@@ -1,0 +1,528 @@
+{
+  "name": "better-sqltools",
+  "displayName": "Better SQLTools",
+  "description": "A modern SQL client for VS Code: pluggable drivers, a themed results grid, schema-aware completion and sqlfluff linting.",
+  "version": "0.1.0",
+  "publisher": "better-sqltools",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters",
+    "Other"
+  ],
+  "keywords": [
+    "sql",
+    "database",
+    "sqlite",
+    "sqlfluff",
+    "query",
+    "driver"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:sql"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Workspace-defined connections and sqlfluff settings are ignored, and linting is off, until you trust this workspace.",
+      "restrictedConfigurations": [
+        "betterSqlTools.connections",
+        "betterSqlTools.lint.sqlfluffPath",
+        "betterSqlTools.lint.sqlfluffArgs"
+      ]
+    }
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "betterSqlTools",
+          "title": "Better SQLTools",
+          "icon": "media/icon.svg"
+        }
+      ],
+      "panel": [
+        {
+          "id": "betterSqlToolsPanel",
+          "title": "SQL Results",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "betterSqlTools": [
+        {
+          "id": "betterSqlTools.connections",
+          "name": "Connections"
+        },
+        {
+          "id": "betterSqlTools.drivers",
+          "name": "Drivers",
+          "visibility": "collapsed"
+        }
+      ],
+      "betterSqlToolsPanel": [
+        {
+          "id": "betterSqlTools.results",
+          "name": "Results",
+          "type": "webview"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "betterSqlTools.connections",
+        "contents": "No connections yet.\n[New Connection](command:betterSqlTools.newConnection)\nSQLite works out of the box. Other databases come from driver extensions.\n[Find Drivers](command:betterSqlTools.findDrivers)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "betterSqlTools.newConnection",
+        "title": "New Connection",
+        "category": "Better SQLTools",
+        "icon": "$(add)"
+      },
+      {
+        "command": "betterSqlTools.editConnection",
+        "title": "Edit Connection",
+        "category": "Better SQLTools",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "betterSqlTools.duplicateConnection",
+        "title": "Duplicate Connection",
+        "category": "Better SQLTools"
+      },
+      {
+        "command": "betterSqlTools.deleteConnection",
+        "title": "Delete Connection",
+        "category": "Better SQLTools",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "betterSqlTools.connect",
+        "title": "Connect",
+        "category": "Better SQLTools",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "betterSqlTools.disconnect",
+        "title": "Disconnect",
+        "category": "Better SQLTools",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "betterSqlTools.refresh",
+        "title": "Refresh",
+        "category": "Better SQLTools",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "betterSqlTools.newQuery",
+        "title": "New Query",
+        "category": "Better SQLTools",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "betterSqlTools.selectConnection",
+        "title": "Select Connection for This Editor",
+        "category": "Better SQLTools",
+        "icon": "$(database)"
+      },
+      {
+        "command": "betterSqlTools.runStatement",
+        "title": "Run Statement",
+        "category": "Better SQLTools",
+        "icon": "$(play)"
+      },
+      {
+        "command": "betterSqlTools.runFile",
+        "title": "Run All Statements in File",
+        "category": "Better SQLTools",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "betterSqlTools.showTableData",
+        "title": "Show Data",
+        "category": "Better SQLTools",
+        "icon": "$(table)"
+      },
+      {
+        "command": "betterSqlTools.generateSelect",
+        "title": "Generate SELECT",
+        "category": "Better SQLTools"
+      },
+      {
+        "command": "betterSqlTools.showDDL",
+        "title": "Show DDL",
+        "category": "Better SQLTools"
+      },
+      {
+        "command": "betterSqlTools.copyName",
+        "title": "Copy Name",
+        "category": "Better SQLTools"
+      },
+      {
+        "command": "betterSqlTools.showHistory",
+        "title": "Show Query History",
+        "category": "Better SQLTools",
+        "icon": "$(history)"
+      },
+      {
+        "command": "betterSqlTools.clearHistory",
+        "title": "Clear Query History",
+        "category": "Better SQLTools"
+      },
+      {
+        "command": "betterSqlTools.findDrivers",
+        "title": "Find Drivers in the Marketplace",
+        "category": "Better SQLTools",
+        "icon": "$(extensions)"
+      },
+      {
+        "command": "betterSqlTools.lintNow",
+        "title": "Lint This File with sqlfluff",
+        "category": "Better SQLTools"
+      },
+      {
+        "command": "betterSqlTools.fixDocument",
+        "title": "Fix Lint Issues with sqlfluff",
+        "category": "Better SQLTools"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "betterSqlTools.editConnection",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.duplicateConnection",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.deleteConnection",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.showTableData",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.generateSelect",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.showDDL",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.copyName",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.runStatement",
+          "when": "editorLangId == sql"
+        },
+        {
+          "command": "betterSqlTools.runFile",
+          "when": "editorLangId == sql"
+        },
+        {
+          "command": "betterSqlTools.selectConnection",
+          "when": "editorLangId == sql"
+        },
+        {
+          "command": "betterSqlTools.lintNow",
+          "when": "editorLangId == sql"
+        },
+        {
+          "command": "betterSqlTools.fixDocument",
+          "when": "editorLangId == sql"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "betterSqlTools.newConnection",
+          "when": "view == betterSqlTools.connections",
+          "group": "navigation@1"
+        },
+        {
+          "command": "betterSqlTools.refresh",
+          "when": "view == betterSqlTools.connections",
+          "group": "navigation@2"
+        },
+        {
+          "command": "betterSqlTools.showHistory",
+          "when": "view == betterSqlTools.connections",
+          "group": "navigation@3"
+        },
+        {
+          "command": "betterSqlTools.findDrivers",
+          "when": "view == betterSqlTools.drivers",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "betterSqlTools.connect",
+          "when": "view == betterSqlTools.connections && viewItem =~ /^connection\\.(disconnected|error)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "betterSqlTools.newQuery",
+          "when": "view == betterSqlTools.connections && viewItem == connection.connected",
+          "group": "inline@1"
+        },
+        {
+          "command": "betterSqlTools.disconnect",
+          "when": "view == betterSqlTools.connections && viewItem == connection.connected",
+          "group": "inline@2"
+        },
+        {
+          "command": "betterSqlTools.showTableData",
+          "when": "view == betterSqlTools.connections && viewItem =~ /^node\\.(table|view)$/",
+          "group": "inline"
+        },
+        {
+          "command": "betterSqlTools.connect",
+          "when": "view == betterSqlTools.connections && viewItem =~ /^connection\\.(disconnected|error)$/",
+          "group": "1_connection@1"
+        },
+        {
+          "command": "betterSqlTools.disconnect",
+          "when": "view == betterSqlTools.connections && viewItem == connection.connected",
+          "group": "1_connection@2"
+        },
+        {
+          "command": "betterSqlTools.newQuery",
+          "when": "view == betterSqlTools.connections && viewItem == connection.connected",
+          "group": "1_connection@3"
+        },
+        {
+          "command": "betterSqlTools.refresh",
+          "when": "view == betterSqlTools.connections && viewItem =~ /^connection\\.connected$|^node\\.(folder|schema|database)$/",
+          "group": "1_connection@4"
+        },
+        {
+          "command": "betterSqlTools.editConnection",
+          "when": "view == betterSqlTools.connections && viewItem =~ /^connection\\./",
+          "group": "2_manage@1"
+        },
+        {
+          "command": "betterSqlTools.duplicateConnection",
+          "when": "view == betterSqlTools.connections && viewItem =~ /^connection\\./",
+          "group": "2_manage@2"
+        },
+        {
+          "command": "betterSqlTools.deleteConnection",
+          "when": "view == betterSqlTools.connections && viewItem =~ /^connection\\./",
+          "group": "2_manage@3"
+        },
+        {
+          "command": "betterSqlTools.showTableData",
+          "when": "view == betterSqlTools.connections && viewItem =~ /^node\\.(table|view)$/",
+          "group": "1_data@1"
+        },
+        {
+          "command": "betterSqlTools.generateSelect",
+          "when": "view == betterSqlTools.connections && viewItem =~ /^node\\.(table|view)$/",
+          "group": "1_data@2"
+        },
+        {
+          "command": "betterSqlTools.showDDL",
+          "when": "view == betterSqlTools.connections && viewItem =~ /^node\\.(table|view|index|trigger|routine|sequence)$/",
+          "group": "1_data@3"
+        },
+        {
+          "command": "betterSqlTools.copyName",
+          "when": "view == betterSqlTools.connections && viewItem =~ /^node\\.(table|view|column|schema|database)$/",
+          "group": "9_copy"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "betterSqlTools.runStatement",
+          "when": "editorLangId == sql",
+          "group": "navigation@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "betterSqlTools.runStatement",
+          "when": "editorLangId == sql",
+          "group": "navigation@1"
+        },
+        {
+          "command": "betterSqlTools.runFile",
+          "when": "editorLangId == sql",
+          "group": "navigation@2"
+        },
+        {
+          "command": "betterSqlTools.selectConnection",
+          "when": "editorLangId == sql",
+          "group": "navigation@3"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "betterSqlTools.runStatement",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "editorTextFocus && editorLangId == sql"
+      },
+      {
+        "command": "betterSqlTools.runFile",
+        "key": "ctrl+shift+enter",
+        "mac": "cmd+shift+enter",
+        "when": "editorTextFocus && editorLangId == sql"
+      }
+    ],
+    "configuration": {
+      "title": "Better SQLTools",
+      "properties": {
+        "betterSqlTools.connections": {
+          "type": "array",
+          "default": [],
+          "scope": "window",
+          "markdownDescription": "Saved connections. Passwords are **not** kept here; they live in VS Code's secret storage. Use the *New Connection* form rather than editing by hand.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "driver"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable identifier. Generated for you; set it yourself when writing profiles by hand."
+              },
+              "name": {
+                "type": "string",
+                "description": "Name shown in the Connections view."
+              },
+              "driver": {
+                "type": "string",
+                "description": "Driver id, for example \"sqlite\"."
+              },
+              "options": {
+                "type": "object",
+                "additionalProperties": true,
+                "markdownDescription": "Driver options. `${workspaceFolder}`, `${userHome}` and `${env:NAME}` are expanded."
+              }
+            }
+          }
+        },
+        "betterSqlTools.results.maxRows": {
+          "type": "number",
+          "default": 1000,
+          "minimum": 1,
+          "maximum": 1000000,
+          "markdownDescription": "Rows loaded per statement. Drivers stop reading after this many."
+        },
+        "betterSqlTools.connection.timeoutMs": {
+          "type": "number",
+          "default": 30000,
+          "minimum": 0,
+          "markdownDescription": "How long to wait for a connection to open, in milliseconds. `0` waits forever."
+        },
+        "betterSqlTools.history.maxEntries": {
+          "type": "number",
+          "default": 200,
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "Queries kept in the history."
+        },
+        "betterSqlTools.codeLens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Run above each statement and the active connection on the first line."
+        },
+        "betterSqlTools.completion.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Offer tables, columns and keywords from the editor's connection."
+        },
+        "betterSqlTools.lint.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Lint SQL files with [sqlfluff](https://sqlfluff.com). Needs sqlfluff installed (`pip install sqlfluff`)."
+        },
+        "betterSqlTools.lint.run": {
+          "type": "string",
+          "enum": [
+            "onSave",
+            "onType",
+            "manual"
+          ],
+          "default": "onSave",
+          "enumDescriptions": [
+            "When a file opens and when it is saved",
+            "Also while typing",
+            "Only with the Lint command"
+          ],
+          "description": "When to lint."
+        },
+        "betterSqlTools.lint.severity": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
+          "default": "warning",
+          "description": "How style issues are shown. Parse errors are always errors."
+        },
+        "betterSqlTools.lint.defaultDialect": {
+          "type": "string",
+          "default": "ansi",
+          "markdownDescription": "sqlfluff dialect for editors without a connection, such as `postgres` or `tsql`. With a connection, its driver's dialect is used."
+        },
+        "betterSqlTools.lint.sqlfluffPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "Path to the `sqlfluff` executable. Empty uses `sqlfluff` from your PATH."
+        },
+        "betterSqlTools.lint.sqlfluffArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine-overridable",
+          "markdownDescription": "Extra arguments for sqlfluff, such as `[\"--config\", \"/path/.sqlfluff\"]`. They come after ours and win."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "vscode:prepublish": "node esbuild.mjs --production",
+    "package": "npm run typecheck && vsce package --no-dependencies --allow-missing-repository --no-rewrite-relative-links",
+    "seed:demo": "node scripts/seed-demo.mjs"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^20.19.43",
+    "@types/sql.js": "^1.4.11",
+    "@types/vscode": "1.90.0",
+    "@vscode/vsce": "^4.1.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^31.0.0",
+    "sql.js": "^1.15.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "betterSqlTools.connections": [
+    {
+      "id": "demo",
+      "name": "Demo library",
+      "driver": "sqlite",
+      "options": { "path": "${workspaceFolder}/demo.db" }
+    }
+  ]
+}

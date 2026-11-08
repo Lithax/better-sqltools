@@ -1,0 +1,28 @@
+body { --page-bg: var(--vscode-editor-background); }
+#root { max-width: 560px; margin: 0 auto; padding: 24px 20px 48px; }
+
+h1 { font-size: 1.5em; font-weight: 600; margin: 0 0 4px; }
+.lead { margin: 0 0 20px; color: var(--vscode-descriptionForeground); }
+
+.field { margin-bottom: 16px; }
+.field > label { display: block; margin-bottom: 4px; font-weight: 600; }
+.field .hint { margin-top: 4px; color: var(--vscode-descriptionForeground); font-size: 0.92em; }
+.req { color: var(--vscode-errorForeground); }
+
+.row { display: flex; gap: 6px; }
+.row input { flex: 1; }
+
+.check { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.check input { margin: 3px 0 0; }
+.check span.label { font-weight: 600; }
+
+fieldset { border: 0; padding: 0; margin: 0 0 16px; }
+legend { padding: 0; margin-bottom: 4px; font-weight: 600; }
+.radio { display: flex; gap: 8px; align-items: baseline; margin: 2px 0; cursor: pointer; }
+
+hr { border: 0; border-top: 1px solid var(--vscode-panel-border); margin: 20px 0; }
+
+.actions { display: flex; align-items: center; gap: 8px; margin-top: 24px; }
+.notice { margin-top: 16px; padding: 8px 12px; border-left: 3px solid; border-radius: 2px; white-space: pre-wrap; background: rgba(128, 128, 128, 0.08); }
+.notice.ok { border-color: var(--vscode-testing-iconPassed, #3fb950); }
+.notice.error { border-color: var(--vscode-errorForeground); background: var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.1)); }

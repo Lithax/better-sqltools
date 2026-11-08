@@ -1,0 +1,18 @@
+{
+  // F5 opens a second VS Code window with the extension loaded and the demo workspace open.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Extension (demo workspace)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--disable-workspace-trust",
+        "${workspaceFolder}/examples/demo"
+      ],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "preLaunchTask": "npm: build"
+    }
+  ]
+}
