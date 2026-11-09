@@ -1,10 +1,10 @@
-import type { DriverDescriptor } from '../../domain/driver-descriptor';
+import type { DriverDescriptor } from '../../../src/api';
 
 export const sqliteDescriptor: DriverDescriptor = {
   id: 'sqlite',
   displayName: 'SQLite',
   description: 'SQLite through sql.js (WebAssembly). Pure JavaScript, nothing native to install.',
-  icon: 'database',
+  icon: 'media/sqlite.svg',
   homepage: 'https://sql.js.org',
   dialect: {
     sqlfluff: 'sqlite',

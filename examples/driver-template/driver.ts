@@ -5,7 +5,7 @@ export const descriptor: DriverDescriptor = {
   id: 'example.echo', // stable and unique; prefix it with your own name
   displayName: 'Echo (example)',
   description: 'Echoes every statement back as a row.',
-  icon: 'comment', // any codicon name
+  icon: 'comment', // a codicon name, or an image path inside your extension ("media/echo.svg")
   dialect: {
     sqlfluff: 'ansi', // which sqlfluff dialect lints this driver's SQL
     identifierQuote: { open: '"', close: '"' },

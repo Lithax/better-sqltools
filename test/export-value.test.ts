@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { toCsv, toJson, toTsv } from '../src/domain/export';
 import { toCell } from '../src/domain/value';
 import { normalizeOptions, validateDescriptor } from '../src/domain/validation';
-import { sqliteDescriptor } from '../src/drivers/sqlite';
+import { sqliteDescriptor } from '../drivers/sqlite/src';
 
 test('toCell makes anything JSON-safe', () => {
   assert.equal(toCell(null), null);

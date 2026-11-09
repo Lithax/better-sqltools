@@ -179,7 +179,7 @@ export class ConnectionManager {
   }
 
   private async openDriver(profile: ConnectionProfile, typedSecrets: Record<string, string>) {
-    const factory = this.deps.registry.require(profile.driver);
+    const factory = await this.deps.registry.ensure(profile.driver);
     const descriptor = factory.descriptor;
 
     const { options, problems } = normalizeOptions(descriptor, profile.options);

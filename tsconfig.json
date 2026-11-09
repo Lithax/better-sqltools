@@ -21,6 +21,7 @@
   "include": [
     "src",
     "test",
-    "examples/driver-template"
+    "examples/driver-template",
+    "drivers"
   ]
 }

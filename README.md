@@ -1,8 +1,8 @@
 # Better SQLTools
 
 A SQL client for VS Code built around a small, stable **driver API**: connection explorer, results grid, schema-aware
-completion and sqlfluff linting, all native to the editor and themed by it. SQLite is built in. Everything else is meant
-to arrive as separate driver extensions that plug into one registry.
+completion and sqlfluff linting, all native to the editor and themed by it. Every database arrives as a **driver
+extension** that plugs into one registry; a SQLite driver lives in this repository (`drivers/sqlite`) as the reference.
 
 > **Status: v0.1, an early build.** The core, the SQLite driver and the sqlfluff integration are covered by tests, and the
 > whole extension is exercised end to end against a mocked VS Code API. It has **not yet been run inside a real VS Code
@@ -15,11 +15,12 @@ npm install
 npm run seed:demo        # only needed if examples/demo/demo.db is missing
 ```
 
-Open this folder in VS Code and press **F5**. A second window opens with the extension loaded and `examples/demo`
-open (a small library database and a `queries.sql` to play with). Click **Demo library** in the Better SQLTools view,
-open `queries.sql`, and press `Ctrl+Enter` (`Cmd+Enter` on a Mac) on a statement.
+Open this folder in VS Code and press **F5**. A second window opens with **both extensions loaded** (the core and the
+SQLite driver) and `examples/demo` open (a small library database and a `queries.sql` to play with). Click **Demo library**
+in the Better SQLTools view, open `queries.sql`, and press `Ctrl+Enter` (`Cmd+Enter` on a Mac) on a statement.
 
-To install it for real: `npm run package`, then `code --install-extension better-sqltools-0.1.0.vsix`.
+To install them for real: `npm run package` and `npm run package:sqlite`, then
+`code --install-extension better-sqltools-0.1.0.vsix` and `code --install-extension drivers/sqlite/better-sqltools-sqlite-0.1.0.vsix`.
 
 ## What it does
 
@@ -41,9 +42,11 @@ To install it for real: `npm run package`, then `code --install-extension better
 * **Linting and formatting with [sqlfluff](https://sqlfluff.com).** Diagnostics, a quick fix that applies every
   auto-fixable rule, and *Format Document*. The dialect comes from the editor's connection. Needs `pip install sqlfluff`;
   a missing install produces one notice, not an error per keystroke. Your project's `.sqlfluff` is honoured.
-* **Drivers.** A *Drivers* view lists what is installed. Connections whose driver is missing stay in the list, flagged,
-  and come alive when it is installed. *Find Drivers* searches the Marketplace for extensions tagged
-  `better-sqltools-driver`.
+* **Drivers are plugins.** A driver is its own extension. It declares itself in its `package.json`
+  (`betterSqlTools.drivers`: id, name, icon), so Better SQLTools can list it before it loads, wakes it when a connection
+  needs it, and shows its icon. A *Drivers* view lists what is installed and what failed to load. Connections whose driver
+  is missing stay in the list, flagged, and come alive when it is installed. *Find Drivers* searches the Marketplace for
+  extensions tagged `better-sqltools-driver`.
 
 ## Architecture
 
@@ -68,13 +71,13 @@ Ports and adapters. Dependencies point inward only, and `test/architecture.test.
 | --- | --- | --- |
 | `src/domain` | nothing | Profiles, results, schema model, driver descriptor, SQL tokenizer/splitter/completion, validation, CSV/JSON export |
 | `src/application` | domain | Use cases and **ports**: the `Driver` SPI plus profile store, secret store, history, settings, linter |
-| `src/drivers` | domain, application ports | The built-in SQLite driver. No VS Code import |
 | `src/adapters` | everything inward | VS Code UI and storage, the sqlfluff CLI adapter |
+| `drivers/*` | `src/api` only | One folder per driver extension, each with its own `package.json`. `drivers/sqlite` is the SQLite driver. No core imports beyond the public API |
 | `src/extension.ts` | everything | Composition root, and the exported API for driver extensions |
 | `media/` | | The two webview pages (plain JS and CSS on VS Code theme variables) |
 
-The built-in SQLite driver registers through the same `registerDriver` call a third-party driver uses. See
-[docs/WRITING_A_DRIVER.md](docs/WRITING_A_DRIVER.md).
+The SQLite driver is a separate extension that registers through the same `registerDriver` call every third-party driver
+uses. See [docs/WRITING_A_DRIVER.md](docs/WRITING_A_DRIVER.md).
 
 ## Settings
 
@@ -100,24 +103,27 @@ untrusted workspace linting is off and `connections`, `sqlfluffPath` and `sqlflu
 
 ```bash
 npm install
-npm run build        # esbuild → dist/extension.js (+ the sql.js WASM beside it)
+npm run build        # esbuild → dist/extension.js, and drivers/sqlite/dist (+ the sql.js WASM beside it)
 npm run typecheck
-npm test             # unit, integration, end to end (mocked VS Code), webviews (jsdom), production bundle
+npm test             # unit, integration, end to end (mocked VS Code), webviews (jsdom), production bundles
 npm run package      # → better-sqltools-0.1.0.vsix
+npm run package:sqlite   # → drivers/sqlite/better-sqltools-sqlite-0.1.0.vsix
+npm run icons        # regenerates the PNG extension icons (no image library needed)
 ```
 
-Before publishing, change `publisher` in `package.json` (driver extensions refer to this extension as
-`<publisher>.better-sqltools`) and add a `repository` URL, so the relative links in this README resolve on the Marketplace.
+Before publishing, change `publisher` in both `package.json` files (driver extensions refer to the core as
+`<publisher>.better-sqltools`) and check the `repository` URL.
 
 Tests, and what they stand in for:
 
 * `splitter`, `completion`, `export-value`: the SQL language logic, pure.
-* `sqlite-driver`: the real driver on real files: persistence, transactions, read-only, foreign keys, stale-file guard.
+* `sqlite-driver` (in `drivers/sqlite/test`): the real driver on real files: persistence, transactions, read-only, foreign keys, stale-file guard.
+* `driver-directory`, `driver-manifests`: lazy activation of driver extensions, and their `package.json` manifests.
 * `application`: services against in-memory ports.
 * `sqlfluff-linter`: the real sqlfluff CLI (skipped if it is not installed).
 * `e2e`: the real `activate()` with only the `vscode` module mocked; the webviews are driven with the messages their pages send.
 * `webviews`: both pages in jsdom, including XSS safety and virtual scrolling.
-* `bundle`: the built `dist/extension.js`, not the sources.
+* `bundle`: the built `dist/extension.js` and the SQLite driver bundle, not the sources.
 * `manifest`, `architecture`, `docs`: commands, menus and settings agree; layers stay layered; the driver guide matches its template.
 
 ## Known limitations

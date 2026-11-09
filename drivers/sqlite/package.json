@@ -1,0 +1,50 @@
+{
+  "name": "better-sqltools-sqlite",
+  "displayName": "Better SQLTools: SQLite Driver",
+  "description": "SQLite driver for Better SQLTools, powered by sql.js (WebAssembly). Nothing native to install.",
+  "version": "0.1.0",
+  "publisher": "better-sqltools",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lithax/better-sqltools.git",
+    "directory": "drivers/sqlite"
+  },
+  "homepage": "https://github.com/Lithax/better-sqltools#readme",
+  "bugs": {
+    "url": "https://github.com/Lithax/better-sqltools/issues"
+  },
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "better-sqltools-driver",
+    "sqlite",
+    "sql",
+    "database"
+  ],
+  "extensionDependencies": [
+    "better-sqltools.better-sqltools"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "betterSqlTools": {
+    "drivers": [
+      {
+        "id": "sqlite",
+        "name": "SQLite",
+        "description": "SQLite through sql.js (WebAssembly). Pure JavaScript, nothing native to install.",
+        "icon": "media/sqlite.svg"
+      }
+    ]
+  }
+}

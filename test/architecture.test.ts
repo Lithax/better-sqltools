@@ -28,7 +28,6 @@ function resolveLayer(from: string, spec: string): string | undefined {
 const rules: Record<string, { allowedLayers: string[]; allowBare: (spec: string) => boolean }> = {
   domain: { allowedLayers: ['domain'], allowBare: () => false },
   application: { allowedLayers: ['domain', 'application'], allowBare: () => false },
-  drivers: { allowedLayers: ['domain', 'application', 'drivers'], allowBare: (s) => s.startsWith('node:') || s === 'sql.js' },
 };
 
 for (const [layer, rule] of Object.entries(rules)) {
@@ -44,3 +43,25 @@ for (const [layer, rule] of Object.entries(rules)) {
     assert.deepEqual(offenders, []);
   });
 }
+
+/** Drivers are plugins: separate extensions that reach the core only through its public api. */
+test('driver extensions only depend on their own code, node, sql.js, vscode and src/api', () => {
+  const root = path.join(__dirname, '..', 'drivers');
+  const api = path.join(__dirname, '..', 'src', 'api');
+  const offenders: string[] = [];
+  for (const dir of fs.readdirSync(root)) {
+    const src = path.join(root, dir, 'src');
+    if (!fs.existsSync(src)) continue;
+    for (const f of files(src)) {
+      for (const spec of imports(f)) {
+        if (!spec.startsWith('.')) {
+          if (!(spec.startsWith('node:') || spec === 'vscode' || spec === 'sql.js')) offenders.push(`${path.relative(root, f)} → ${spec}`);
+          continue;
+        }
+        const target = path.resolve(path.dirname(f), spec);
+        if (!(target === src || target.startsWith(src + path.sep) || target === api)) offenders.push(`${path.relative(root, f)} → ${spec}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, []);
+});

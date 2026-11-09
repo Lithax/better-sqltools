@@ -39,7 +39,7 @@ test('menu "view ==" clauses name declared views', () => {
 });
 
 test('every betterSqlTools.* identifier in the source is a command, view, setting or known id', () => {
-  const known = new Set<string>([...declaredCommands, ...viewIds, 'betterSqlTools.connectionForm', 'betterSqlTools.history', 'betterSqlTools.bindings']);
+  const known = new Set<string>([...declaredCommands, ...viewIds, 'betterSqlTools.connectionForm', 'betterSqlTools.history', 'betterSqlTools.bindings', 'betterSqlTools.hasDrivers']);
   const sections = new Set(configKeys.flatMap((k) => k.split('.').map((_, i, a) => a.slice(0, i + 1).join('.'))));
   const unknown: string[] = [];
   for (const f of sourceFiles('src')) {

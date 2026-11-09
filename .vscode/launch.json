@@ -1,17 +1,19 @@
 {
-  // F5 opens a second VS Code window with the extension loaded and the demo workspace open.
+  // F5 opens a second VS Code window with the core extension AND the SQLite driver extension loaded,
+  // and the demo workspace open.
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run Extension (demo workspace)",
+      "name": "Run Extensions (demo workspace)",
       "type": "extensionHost",
       "request": "launch",
       "args": [
         "--extensionDevelopmentPath=${workspaceFolder}",
+        "--extensionDevelopmentPath=${workspaceFolder}/drivers/sqlite",
         "--disable-workspace-trust",
         "${workspaceFolder}/examples/demo"
       ],
-      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js", "${workspaceFolder}/drivers/*/dist/**/*.js"],
       "preLaunchTask": "npm: build"
     }
   ]

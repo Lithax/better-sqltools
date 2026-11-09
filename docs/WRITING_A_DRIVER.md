@@ -27,7 +27,7 @@ export const descriptor: DriverDescriptor = {
   id: 'example.echo', // stable and unique; prefix it with your own name
   displayName: 'Echo (example)',
   description: 'Echoes every statement back as a row.',
-  icon: 'comment', // any codicon name
+  icon: 'comment', // a codicon name, or an image path inside your extension ("media/echo.svg")
   dialect: {
     sqlfluff: 'ansi', // which sqlfluff dialect lints this driver's SQL
     identifierQuote: { open: '"', close: '"' },
@@ -106,12 +106,30 @@ and in the driver extension's `package.json`:
 {
   "extensionDependencies": ["better-sqltools.better-sqltools"],
   "keywords": ["better-sqltools-driver"],
-  "activationEvents": ["onStartupFinished"]
+  "activationEvents": [],
+  "betterSqlTools": {
+    "drivers": [
+      {
+        "id": "example.echo",
+        "name": "Echo (example)",
+        "description": "Echoes every statement back as a row.",
+        "icon": "media/echo.svg"
+      }
+    ]
+  }
 }
 ```
 
+The `betterSqlTools.drivers` entry is how Better SQLTools finds your driver **without loading it**: it lists it in the
+*Drivers* view and the driver picker, draws its `icon`, and activates your extension the first time a connection needs it
+(or when it starts, for drivers already installed). So keep `activationEvents` empty and `activate()` light: register the
+factory, and load heavy libraries inside `create()` or `open()`. `id` must match your descriptor's `id`. `icon` is a
+codicon name or a path to an image in your extension (`{ "light": "…", "dark": "…" }` for per-theme images); the
+descriptor's `icon` takes the same values.
+
 The `better-sqltools-driver` keyword is what the **Find Drivers** button searches the Marketplace for. Replace the
-publisher in the extension id with the one you publish under.
+publisher in the extension id with the one you publish under. `drivers/sqlite` in this repository is a complete,
+real-world example.
 
 `registerDriver` throws if the descriptor is invalid or the id is already taken, and returns a disposable that
 unregisters the driver again. Connections that point at a driver that is not installed stay in the list, marked as such,

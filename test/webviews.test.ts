@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { after, test } from 'node:test';
 import { JSDOM } from 'jsdom';
-import { sqliteDescriptor } from '../src/drivers/sqlite';
+import { sqliteDescriptor } from '../drivers/sqlite/src';
 
 const windows: { close(): void }[] = [];
 // jsdom timers (the running spinner's setInterval) would keep the test process alive otherwise

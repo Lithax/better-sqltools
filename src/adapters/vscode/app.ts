@@ -1,6 +1,7 @@
 import type * as vscode from 'vscode';
 import type { CompletionService } from '../../application/completion-service';
 import type { ConnectionManager } from '../../application/connection-manager';
+import type { DriverDirectory } from '../../application/driver-directory';
 import type { DriverRegistry } from '../../application/driver-registry';
 import type { HistoryRepository } from '../../application/ports';
 import type { LintService } from '../../application/lint-service';
@@ -20,6 +21,7 @@ export interface App {
   logger: VsCodeLogger;
   settings: VsCodeSettings;
   registry: DriverRegistry;
+  drivers: DriverDirectory;
   connections: ConnectionManager;
   schema: SchemaService;
   queries: QueryService;

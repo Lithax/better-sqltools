@@ -9,6 +9,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { after, before, test } from 'node:test';
 import { toCsv } from '../src/domain/export';
+import { SqliteDriverFactory } from '../drivers/sqlite/src';
 import { fakeFactory, type FakeDriverState } from './fakes';
 import { tmpDir } from './helpers';
 import { installVscodeMock } from './vscode-mock';
@@ -38,7 +39,17 @@ async function waitFor<T>(fn: () => T | undefined, ms = 20_000): Promise<T> {
   }
 }
 
-before(async () => { api = await ext.activate(mock.context as any); });
+before(async () => {
+  api = await ext.activate(mock.context as any);
+  // SQLite is a separate extension. Install it the way VS Code lists one: the core finds it through its
+  // package.json manifest, wakes it after activating, and the driver registers through the public API.
+  mock.addExtension({
+    id: 'better-sqltools.better-sqltools-sqlite',
+    packageJSON: { version: '0.1.0', betterSqlTools: { drivers: [{ id: 'sqlite', name: 'SQLite', icon: 'media/sqlite.svg' }] } },
+    activate: () => void api.registerDriver(new SqliteDriverFactory()),
+  });
+  await waitFor(() => state.treeProviders['betterSqlTools.drivers'].getChildren().find((d: any) => d.state === 'ready'));
+});
 after(async () => { await ext.deactivate(); mock.uninstall(); });
 
 test('activation wires every contribution in the manifest', () => {
@@ -50,10 +61,12 @@ test('activation wires every contribution in the manifest', () => {
   assert.ok(mock.context.subscriptions.length >= 10);
 });
 
-test('drivers: the built-in SQLite driver and third-party drivers share one door', () => {
+test('drivers: SQLite is a plugin like any third-party driver, and both share one door', () => {
   const tree = state.treeProviders['betterSqlTools.drivers'];
   assert.deepEqual(tree.getChildren().map((d: any) => d.id), ['sqlite']);
   assert.equal(tree.getTreeItem(tree.getChildren()[0]).label, 'SQLite');
+  const icon = tree.getTreeItem(tree.getChildren()[0]).iconPath;
+  assert.ok(String(icon).endsWith('/better-sqltools.better-sqltools-sqlite/media/sqlite.svg'), 'the driver ships its own icon');
 
   const reg = api.registerDriver(fakeFactory({ opened: 0, closed: 0, executed: [], openDelayMs: 0 }));
   assert.deepEqual(tree.getChildren().map((d: any) => d.id), ['fake', 'sqlite']);

@@ -70,7 +70,17 @@ class Memento {
   async update(k: string, v: unknown) { if (v === undefined) this.m.delete(k); else this.m.set(k, JSON.parse(JSON.stringify(v))); }
 }
 
+/** An installed extension as `vscode.extensions` shows it. */
+export interface MockExtension {
+  id: string;
+  packageJSON: any;
+  extensionUri: Uri;
+  readonly isActive: boolean;
+  activate(): Promise<unknown>;
+}
+
 export interface MockState {
+  extensions: MockExtension[];
   commands: Map<string, Fn>;
   executed: [string, unknown[]][];
   treeProviders: Record<string, any>;
@@ -137,11 +147,11 @@ export function installVscodeMock(folder: string) {
     commands: new Map(), executed: [], treeProviders: {}, webviewViewProviders: {}, resultsMessages: [], panels: [],
     providers: {}, diagnostics: new Map(), statusBar: {}, messages: [], quickPickAnswers: [], inputAnswers: [],
     messageAnswers: [], openDialogAnswers: [], saveDialogAnswers: [], config: { user: {}, workspace: {} },
-    clipboard: '', documents: [], secrets: new Map(), folder, logs: [],
+    clipboard: '', documents: [], secrets: new Map(), folder, logs: [], extensions: [],
   };
   const ev = {
     config: new Emitter<any>(), open: new Emitter<any>(), save: new Emitter<any>(), change: new Emitter<any>(),
-    close: new Emitter<any>(), trust: new Emitter<void>(), activeEditor: new Emitter<any>(),
+    close: new Emitter<any>(), trust: new Emitter<void>(), activeEditor: new Emitter<any>(), extChange: new Emitter<void>(),
   };
   let untitled = 0;
   const message = (kind: string) => async (msg: string, ...rest: any[]) => {
@@ -178,6 +188,11 @@ export function installVscodeMock(folder: string) {
     CompletionItemKind: { Function: 2, Field: 4, Class: 6, Interface: 7, Module: 8, Keyword: 13 },
     ProgressLocation: { Window: 10, Notification: 15 },
     ViewColumn: { Active: -1 },
+    extensions: {
+      get all() { return state.extensions; },
+      getExtension: (id: string) => state.extensions.find((e) => e.id === id),
+      onDidChange: ev.extChange.event,
+    },
 
     commands: {
       registerCommand: (id: string, fn: Fn) => { state.commands.set(id, fn); return { dispose: () => state.commands.delete(id) }; },
@@ -300,6 +315,20 @@ export function installVscodeMock(folder: string) {
   return {
     vscode, state, context, events: ev,
     uninstall: () => { M._load = original; },
+    /** Installs an extension the way VS Code lists it; `activate` runs at most once, on first use. */
+    addExtension(spec: { id: string; packageJSON: any; activate: () => Promise<unknown> | unknown }): MockExtension {
+      let started: Promise<unknown> | undefined;
+      const e: MockExtension = {
+        id: spec.id,
+        packageJSON: spec.packageJSON,
+        extensionUri: Uri.file(path.join(folder, '.mock-extensions', spec.id)),
+        get isActive() { return started !== undefined; },
+        activate: () => (started ??= Promise.resolve().then(spec.activate)),
+      };
+      state.extensions.push(e);
+      ev.extChange.fire();
+      return e;
+    },
     /** Opens a SQL editor on `content` with the cursor at `cursor` (offset, or the marker `|` in content). */
     async openSql(content: string) {
       const offset = content.indexOf('|');

@@ -7,6 +7,7 @@ import { SqlCodeLensProvider } from './adapters/vscode/codelens';
 import { registerCommands } from './adapters/vscode/commands';
 import { SqlCompletionProvider } from './adapters/vscode/completion';
 import { LintController, SqlFixActions, SqlFormatter } from './adapters/vscode/diagnostics';
+import { VsCodeDriverExtensions } from './adapters/vscode/driver-extensions';
 import { VsCodeHistory } from './adapters/vscode/history-repository';
 import { VsCodeLogger } from './adapters/vscode/logger';
 import { SettingsProfileRepository } from './adapters/vscode/profile-repository';
@@ -19,12 +20,12 @@ import { ConnectionsTree, DriversTree } from './adapters/vscode/trees';
 import { resolvePath, resolveVariables } from './adapters/vscode/variables';
 import { CompletionService } from './application/completion-service';
 import { ConnectionManager } from './application/connection-manager';
+import { DriverDirectory } from './application/driver-directory';
 import { DriverRegistry } from './application/driver-registry';
 import { LintService } from './application/lint-service';
 import type { SecretPrompter } from './application/ports';
 import { QueryService } from './application/query-service';
 import { SchemaService } from './application/schema-service';
-import { SqliteDriverFactory } from './drivers/sqlite';
 
 let shutdown: (() => Promise<void>) | undefined;
 
@@ -43,6 +44,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 
   // core
   const registry = new DriverRegistry();
+  const driverHost = new VsCodeDriverExtensions();
+  const drivers = new DriverDirectory(registry, driverHost, logger);
   const connections = new ConnectionManager({
     registry, profiles, secrets, prompter, settings, logger, resolveVariables, env: { logger, resolvePath },
   });
@@ -66,17 +69,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
   const linting = new LintController({ lint, bindings, settings, logger });
 
   const app: App = {
-    context, logger, settings, registry, connections, schema, queries, completion, lint,
+    context, logger, settings, registry, drivers, connections, schema, queries, completion, lint,
     profiles, secrets, history, bindings, runner, linting,
   };
 
-  // the built-in driver goes through the same door as third-party ones
-  registry.register(new SqliteDriverFactory());
+  // Drivers are plugins: other extensions register them through the exported API. This view of what
+  // is installed (and whether any driver exists at all) drives the welcome text of the sidebar.
+  const syncDriverContext = () => void vscode.commands.executeCommand('setContext', 'betterSqlTools.hasDrivers', drivers.list().length > 0);
+  syncDriverContext();
 
   const connectionsTree = new ConnectionsTree(app);
   const sql: vscode.DocumentSelector = { language: 'sql' };
   context.subscriptions.push(
-    logger, profiles, bindings, linting, connectionsTree,
+    logger, profiles, bindings, linting, connectionsTree, driverHost, drivers.onDidChange(syncDriverContext),
     vscode.window.createTreeView('betterSqlTools.connections', { treeDataProvider: connectionsTree, showCollapseAll: true }),
     vscode.window.registerTreeDataProvider('betterSqlTools.drivers', new DriversTree(app)),
     vscode.window.registerWebviewViewProvider(ResultsView.viewId, results, { webviewOptions: { retainContextWhenHidden: true } }),
@@ -91,6 +96,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 
   shutdown = () => connections.disconnectAll();
   logger.info('Better SQLTools is ready.');
+
+  // Wake installed driver extensions once we are done activating: a driver depends on this extension,
+  // so activating it from inside activate() would wait for us to finish while we wait for it.
+  const wake = setTimeout(() => void drivers.activateAll(), 0);
+  context.subscriptions.push({ dispose: () => clearTimeout(wake) });
 
   return {
     apiVersion: 1,

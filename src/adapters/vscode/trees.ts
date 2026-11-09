@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import { errorMessage } from '../../domain/errors';
-import type { DriverDescriptor } from '../../domain/driver-descriptor';
+import type { DriverEntry } from '../../application/driver-directory';
 import type { ConnectionId, SchemaNode } from '../../domain/model';
 import type { App } from './app';
+import { treeIcon } from './driver-icons';
 
 export type TreeNode =
   | { type: 'connection'; id: ConnectionId }
@@ -128,14 +129,14 @@ export class ConnectionsTree implements vscode.TreeDataProvider<TreeNode>, vscod
   }
 }
 
-/** Installed drivers: what is available, which dialect, what it can do. */
-export class DriversTree implements vscode.TreeDataProvider<DriverDescriptor>, vscode.Disposable {
+/** Installed drivers: what is available, which dialect, what it can do, and what failed to load. */
+export class DriversTree implements vscode.TreeDataProvider<DriverEntry>, vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.emitter.event;
   private readonly sub: { dispose(): void };
 
-  constructor(private readonly app: Pick<App, 'registry'>) {
-    this.sub = app.registry.onDidChange(() => this.emitter.fire());
+  constructor(private readonly app: Pick<App, 'drivers'>) {
+    this.sub = app.drivers.onDidChange(() => this.emitter.fire());
   }
 
   dispose() {
@@ -143,23 +144,40 @@ export class DriversTree implements vscode.TreeDataProvider<DriverDescriptor>, v
     this.emitter.dispose();
   }
 
-  getChildren(): DriverDescriptor[] {
-    return this.app.registry.list();
+  getChildren(): DriverEntry[] {
+    return this.app.drivers.list();
   }
 
-  getTreeItem(d: DriverDescriptor): vscode.TreeItem {
+  getTreeItem(d: DriverEntry): vscode.TreeItem {
     const item = new vscode.TreeItem(d.displayName, vscode.TreeItemCollapsibleState.None);
-    item.id = `driver/${d.id}`;
-    item.description = [d.version ? `v${d.version}` : '', d.id].filter(Boolean).join(' · ');
-    item.iconPath = new vscode.ThemeIcon(d.icon ?? 'plug');
-    item.contextValue = 'driver';
-
-    const caps = Object.entries(d.capabilities).filter(([, on]) => on).map(([k]) => k);
+    item.id = `driver/${d.id}/${d.state}`;
+    item.contextValue = `driver.${d.state}`;
     const tip = new vscode.MarkdownString();
     tip.appendMarkdown(`**${d.displayName}** (\`${d.id}\`)\n\n`);
     if (d.description) tip.appendMarkdown(`${d.description}\n\n`);
-    tip.appendMarkdown(`Dialect for linting: \`${d.dialect.sqlfluff ?? 'ansi'}\`\n\n`);
-    tip.appendMarkdown(`Capabilities: ${caps.length ? caps.join(', ') : 'basic'}`);
+    if (d.extensionId) tip.appendMarkdown(`Extension: \`${d.extensionId}\`\n\n`);
+
+    switch (d.state) {
+      case 'failed':
+        item.description = 'failed to load';
+        item.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('errorForeground'));
+        tip.appendMarkdown('This driver\'s extension threw while activating:');
+        tip.appendCodeblock(d.error ?? 'unknown error', 'text');
+        break;
+      case 'inactive':
+        item.description = 'loading…';
+        item.iconPath = treeIcon(d);
+        tip.appendMarkdown('Installed, but it has not registered with Better SQLTools yet.');
+        break;
+      default: {
+        item.description = [d.version ? `v${d.version}` : '', d.id].filter(Boolean).join(' · ');
+        item.iconPath = treeIcon(d);
+        const desc = d.descriptor!;
+        const caps = Object.entries(desc.capabilities).filter(([, on]) => on).map(([k]) => k);
+        tip.appendMarkdown(`Dialect for linting: \`${desc.dialect.sqlfluff ?? 'ansi'}\`\n\n`);
+        tip.appendMarkdown(`Capabilities: ${caps.length ? caps.join(', ') : 'basic'}`);
+      }
+    }
     item.tooltip = tip;
     return item;
   }

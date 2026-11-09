@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { test } from 'node:test';
-import type { Driver } from '../src/application/ports';
-import { SqliteDriverFactory } from '../src/drivers/sqlite';
-import { testEnv, tmpDir } from './helpers';
+import type { Driver } from '../../../src/api';
+import { SqliteDriverFactory } from '../src';
+import { testEnv, tmpDir } from '../../../test/helpers';
 
 const factory = new SqliteDriverFactory();
 const ctx = { maxRows: 1000 };

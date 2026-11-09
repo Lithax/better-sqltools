@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { test } from 'node:test';
-import { SqliteDriverFactory, sqliteDescriptor } from '../src/drivers/sqlite';
+import { SqliteDriverFactory, sqliteDescriptor } from '../drivers/sqlite/src';
 import { splitStatements } from '../src/domain/sql/splitter';
 import { tokenizerOptions } from '../src/domain/sql/tokenizer';
 import { testEnv, tmpDir } from './helpers';

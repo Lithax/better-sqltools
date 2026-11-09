@@ -5,7 +5,7 @@
  *                              built in or contributed by other VS Code extensions.
  *   everything else          - implemented by the host adapter (VS Code) or by tests.
  */
-import type { ConnectionField, DriverDescriptor } from '../domain/driver-descriptor';
+import type { ConnectionField, DriverDescriptor, DriverIcon } from '../domain/driver-descriptor';
 import type {
   Catalog, Column, ConnectionId, ConnectionProfile, HistoryEntry, LintIssue, SchemaNode,
 } from '../domain/model';
@@ -60,6 +60,27 @@ export interface DriverFactory {
 }
 
 // ---- driven ports ------------------------------------------------------------
+
+/** A driver that an installed extension declares in its package.json (`betterSqlTools.drivers`). */
+export interface InstalledDriver {
+  id: string;
+  name: string;
+  description?: string;
+  icon?: DriverIcon;
+  /** The extension that provides it, e.g. "better-sqltools.better-sqltools-sqlite". */
+  extensionId: string;
+  /** The extension's folder as a URI string; relative icon paths are resolved against it. */
+  baseUri?: string;
+  version?: string;
+}
+
+/** How the core finds and wakes driver extensions. Implemented by the host (VS Code) adapter. */
+export interface DriverExtensionHost {
+  list(): InstalledDriver[];
+  /** Activates the extension; resolves once its activate() returned, rejects if it threw. */
+  activate(extensionId: string): Promise<void>;
+  readonly onDidChange: Event<void>;
+}
 
 export interface Logger {
   debug(message: string, ...args: unknown[]): void;

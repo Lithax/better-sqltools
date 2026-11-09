@@ -9,6 +9,12 @@ export function validateDescriptor(d: DriverDescriptor): string[] {
   if (!d?.displayName) problems.push('Driver displayName is required.');
   if (!d?.dialect?.identifierQuote) problems.push('Driver dialect.identifierQuote is required.');
   if (!d?.dialect?.limit) problems.push('Driver dialect.limit is required.');
+  const icon = d?.icon;
+  const iconOk =
+    icon === undefined ||
+    typeof icon === 'string' ||
+    (typeof icon === 'object' && icon !== null && typeof icon.light === 'string' && typeof icon.dark === 'string');
+  if (!iconOk) problems.push('Driver icon must be a codicon id, an image path, or { light, dark }.');
   const seen = new Set<string>();
   for (const f of d?.connectionSchema ?? []) {
     if (!f.key) problems.push('A connection field has no key.');

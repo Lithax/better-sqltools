@@ -6,8 +6,8 @@ export class BetterSqlToolsError extends Error {
 }
 
 export class DriverNotFoundError extends BetterSqlToolsError {
-  constructor(readonly driverId: string) {
-    super(`Driver "${driverId}" is not installed or failed to load.`, 'DRIVER_NOT_FOUND');
+  constructor(readonly driverId: string, detail?: string) {
+    super(`Driver "${driverId}" is not installed or failed to load${detail ? `: ${detail}` : '.'}`, 'DRIVER_NOT_FOUND');
   }
 }
 

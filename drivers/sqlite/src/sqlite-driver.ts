@@ -1,10 +1,10 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import initSqlJs, { type Database, type SqlJsStatic, type SqlValue } from 'sql.js';
-import type { Catalog, CatalogTable, SchemaNode } from '../../domain/model';
+import type { Catalog, CatalogTable, SchemaNode } from '../../../src/api';
 import type {
   Driver, DriverConfig, DriverEnvironment, DriverFactory, ExecutionContext, RawStatementResult,
-} from '../../application/ports';
+} from '../../../src/api';
 import { sqliteDescriptor } from './descriptor';
 
 /**

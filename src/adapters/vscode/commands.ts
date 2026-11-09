@@ -115,7 +115,18 @@ export function registerCommands(app: App, tree: ConnectionsTree): vscode.Dispos
   // ---- commands ----------------------------------------------------------------
 
   return [
-    cmd('newConnection', () => ConnectionForm.show(app)),
+    cmd('newConnection', async () => {
+      if (!app.drivers.list().length) {
+        const pick = await vscode.window.showInformationMessage(
+          'Better SQLTools talks to databases through driver extensions, and none is installed yet.',
+          'Find Drivers',
+        );
+        if (pick) await vscode.commands.executeCommand('betterSqlTools.findDrivers');
+        return;
+      }
+      await app.drivers.activateAll().catch(() => undefined); // the form needs every installed driver registered
+      ConnectionForm.show(app);
+    }),
 
     cmd('editConnection', async (el: TreeNode) => {
       const profile = connections.info(connectionOf(el) ?? '')?.profile;

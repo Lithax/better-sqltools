@@ -51,14 +51,24 @@ export interface DriverCapabilities {
   schemas?: boolean;
 }
 
+/**
+ * A codicon id without the `$()` wrapper ("database"), or the path of an image inside the driver's
+ * extension ("media/icon.svg"). `{ light, dark }` picks an image per colour theme kind.
+ */
+export type DriverIcon = string | { light: string; dark: string };
+
+const IMAGE_RE = /\.(svg|png|jpe?g|gif|webp)$/i;
+/** True when `icon` names an image file rather than a codicon. */
+export const isImageIcon = (icon: string): boolean => IMAGE_RE.test(icon);
+
 export interface DriverDescriptor {
   /** Stable id, e.g. "sqlite", "postgres", "acme.snowflake". */
   id: string;
   displayName: string;
   description?: string;
   version?: string;
-  /** A codicon name without the `$()` wrapper. */
-  icon?: string;
+  /** Shown next to connections that use this driver. Defaults to a generic database icon. */
+  icon?: DriverIcon;
   homepage?: string;
   dialect: DialectInfo;
   capabilities: DriverCapabilities;
