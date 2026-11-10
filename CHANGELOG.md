@@ -12,6 +12,11 @@
 * **Project configuration** in `.better-sqltools.toml` / `.better-sqltools/*.toml`: connections, groups and any
   setting, with problems reported in the Problems panel. See `docs/CONFIGURATION.md`.
 * Inline passwords may use `${env:NAME}` and the other variables; an unset variable prompts instead of becoming an empty password.
+* **Connections view** shows each driver's own icon and name (connected state as a coloured label), how many objects a
+  folder holds and, optionally, rows per table. Each is a `betterSqlTools.explorer.*` setting.
+* **Filter Objects** and **Search Objects** to find tables, views and columns in a large schema.
+* **Inspect Connection**: uptime, session metrics (statements, errors, rows, timings) and driver-reported health. The
+  SQLite driver reports version, size, integrity and foreign-key checks.
 
 ## 0.1.0
 

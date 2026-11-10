@@ -8,7 +8,7 @@
 import type { ConnectionGroup } from '../domain/model';
 import type { ConnectionField, DriverDescriptor, DriverIcon } from '../domain/driver-descriptor';
 import type {
-  Catalog, Column, ConnectionId, ConnectionProfile, HistoryEntry, LintIssue, SchemaNode,
+  Catalog, Column, ConnectionId, ConnectionProfile, DriverInspection, HistoryEntry, LintIssue, SchemaNode,
 } from '../domain/model';
 import type { Event } from './events';
 
@@ -34,12 +34,16 @@ export interface Driver {
   close(): Promise<void>;
   /** Execute exactly one statement; the core already split the script. */
   execute(sql: string, ctx: ExecutionContext): Promise<RawStatementResult>;
-  /** Children of `parent`, or the top level when undefined. */
-  children(parent?: SchemaNode): Promise<SchemaNode[]>;
+  /** Children of `parent`, or the top level when undefined. `options` are hints a driver may ignore. */
+  children(parent?: SchemaNode, options?: ChildrenOptions): Promise<SchemaNode[]>;
   /** Optional bulk snapshot for completion. Without it the core walks `children`. */
   catalog?(): Promise<Catalog>;
   /** Optional: CREATE statement for a node. */
   ddl?(node: SchemaNode): Promise<string>;
+  /** Optional: a cheap round trip, so the core can time the connection. */
+  ping?(): Promise<void>;
+  /** Optional: version, size, settings and health checks for the "Inspect connection" view. */
+  inspect?(): Promise<DriverInspection>;
 }
 
 export interface DriverConfig {
@@ -119,6 +123,8 @@ export interface SettingsReader {
   connectTimeoutMs(): number;
   historyLimit(): number;
   defaultDialect(): string;
+  /** Ask drivers for the row count of every table they list (can be slow on big tables). */
+  showRowCounts(): boolean;
 }
 
 export interface LintRequest {
@@ -170,4 +176,10 @@ export interface GroupRepository {
   save(group: ConnectionGroup, scope: 'user' | 'workspace'): Promise<void>;
   remove(id: string): Promise<void>;
   readonly onDidChange: Event<void>;
+}
+
+/** Hints for `Driver.children`. A driver may ignore them. */
+export interface ChildrenOptions {
+  /** Fill in `SchemaNode.rowCount` for tables. */
+  rowCounts?: boolean;
 }

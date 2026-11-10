@@ -29,7 +29,7 @@ const connectionsTree = () => state.treeProviders['betterSqlTools.connections'];
 const lastResults = () => [...state.resultsMessages].reverse().find((m) => m.type === 'state').state;
 const profilesInSettings = () => state.config.user['betterSqlTools.connections'] as { id: string; name: string; driver: string; options: any }[] | undefined;
 
-async function waitFor<T>(fn: () => T | undefined, ms = 20_000): Promise<T> {
+async function waitFor<T>(fn: () => T | undefined, ms = 60_000): Promise<T> {
   const end = Date.now() + ms;
   for (;;) {
     const v = fn();

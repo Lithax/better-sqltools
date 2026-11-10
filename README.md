@@ -51,6 +51,15 @@ To install them for real: `npm run package` and `npm run package:sqlite`, then
   from the view, drag connections in, or use *Move to Group*. A project can also carry its own configuration in a
   `.better-sqltools.toml` (or a `.better-sqltools/` folder of `*.toml` files): connections, groups and any extension
   setting, versioned with the code. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+* **Finding things.** *Filter Objects* (the filter icon in the Connections view) narrows the tree to objects whose name
+  matches; plain text matches anywhere and `*` / `?` are wildcards. *Search Objects* is a quick pick over every table,
+  view and column of a connection, with *Show data*, *Generate SELECT* and *Copy name* for the pick.
+* **Inspect connection.** A page with the connection's uptime, what the core measured since connecting (statements, errors,
+  rows, timings, a ping where the driver can) and whatever the driver reports about its database: for SQLite the version,
+  size, integrity and foreign-key checks. It refreshes while visible.
+* **A tree you can tune.** A connection shows its driver's own icon and the driver's name, with connected state as a
+  coloured label like Git status. Folders show how many objects they hold, and tables can show their row count. Each of
+  these is a setting (`betterSqlTools.explorer.*`).
 
 ## Architecture
 
@@ -92,6 +101,10 @@ uses. See [docs/WRITING_A_DRIVER.md](docs/WRITING_A_DRIVER.md).
 | `betterSqlTools.results.maxRows` | `1000` | Rows loaded per statement. |
 | `betterSqlTools.connection.timeoutMs` | `30000` | Connect timeout; `0` waits forever. |
 | `betterSqlTools.history.maxEntries` | `200` | Queries kept. |
+| `betterSqlTools.explorer.driverIcons` | `true` | The driver's icon in front of a connection instead of the green database icon. |
+| `betterSqlTools.explorer.showDriverName` | `true` | The driver's name after the connection's. |
+| `betterSqlTools.explorer.showCounts` | `true` | How many objects a folder holds. |
+| `betterSqlTools.explorer.showRowCounts` | `false` | Rows per table. Costs one query per table, so it is off by default. |
 | `betterSqlTools.codeLens.enabled` | `true` | *Run* lenses and the connection lens. |
 | `betterSqlTools.completion.enabled` | `true` | Schema-aware completion. |
 | `betterSqlTools.lint.enabled` | `true` | sqlfluff diagnostics. |

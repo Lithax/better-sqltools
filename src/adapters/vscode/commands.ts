@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { CancelledError, DriverNotFoundError, errorMessage, ProjectManagedError } from '../../domain/errors';
-import type { ConnectionId, ConnectionProfile, HistoryEntry, SchemaNode } from '../../domain/model';
+import type { CatalogTable, ConnectionId, ConnectionProfile, HistoryEntry, SchemaNode } from '../../domain/model';
 import { selectSample } from '../../domain/sql/generate';
 import { splitStatements, statementAt } from '../../domain/sql/splitter';
 import { tokenizerOptions } from '../../domain/sql/tokenizer';
@@ -8,6 +8,7 @@ import type { App } from './app';
 import { ConnectionForm } from './connection-form';
 import { cwdFor, fullRange } from './diagnostics';
 import { slug } from './profile-repository';
+import { InspectView } from './inspect-view';
 import { CONFIG_FILE } from './project-files';
 import { PROJECT_TEMPLATE } from './project-template';
 import type { ConnectionsTree, TreeNode } from './trees';
@@ -258,6 +259,62 @@ export function registerCommands(app: App, tree: ConnectionsTree): vscode.Dispos
     }),
 
     cmd('reloadProjectConfig', () => app.project.reload()),
+
+    // ---- finding things ----------------------------------------------------------
+
+    cmd('filterObjects', async () => {
+      const value = await vscode.window.showInputBox({
+        title: 'Filter objects',
+        prompt: 'Show only tables, views, indexes and other objects whose name matches. Plain text matches anywhere; * and ? are wildcards. Leave it empty to clear.',
+        value: tree.activeFilter,
+      });
+      if (value !== undefined) tree.setFilter(value);
+    }),
+
+    cmd('clearFilter', () => tree.setFilter('')),
+
+    cmd('searchObjects', async (el?: TreeNode) => {
+      const id = connectionOf(el) ?? (await pickConnection('Search which connection?', (s) => s === 'connected'));
+      if (!id) return;
+      const dialect = dialectOf(id);
+      const catalog = await schema.catalog(id);
+      if (!dialect || !catalog.tables.length) return void vscode.window.showInformationMessage('Nothing to search: this connection has no tables or views yet.');
+      interface ObjectPick extends vscode.QuickPickItem {
+        table: CatalogTable;
+        column?: string;
+      }
+      const items: ObjectPick[] = catalog.tables.flatMap((t): ObjectPick[] => [
+        {
+          label: `$(${t.kind === 'view' ? 'eye' : 'table'}) ${t.name}`,
+          description: t.schema ?? '',
+          detail: `${t.kind}, ${t.columns.length} column${t.columns.length === 1 ? '' : 's'}`,
+          table: t,
+        },
+        ...t.columns.map((c): ObjectPick => ({
+          label: `$(symbol-field) ${t.name}.${c.name}`,
+          description: c.type ?? '',
+          detail: c.primaryKey ? 'primary key' : undefined,
+          table: t,
+          column: c.name,
+        })),
+      ]);
+      const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Search tables, views and columns\u2026', matchOnDescription: true });
+      if (!pick) return;
+      const qualified = pick.table.qualifiedName ?? (pick.table.schema ? `${pick.table.schema}.${pick.table.name}` : pick.table.name);
+      const action = await vscode.window.showQuickPick(
+        [{ label: '$(table) Show data' }, { label: '$(edit) Generate SELECT' }, { label: '$(copy) Copy name' }],
+        { placeHolder: pick.column ? `${pick.table.name}.${pick.column}` : pick.table.name },
+      );
+      if (!action) return;
+      if (action.label.endsWith('Show data')) await app.runner.run(id, selectSample(qualified, dialect, 1000));
+      else if (action.label.endsWith('Generate SELECT')) await openSql(id, selectSample(qualified, dialect, 100) + '\n');
+      else await vscode.env.clipboard.writeText(pick.column ? `${pick.table.name}.${pick.column}` : qualified);
+    }),
+
+    cmd('inspectConnection', async (el?: TreeNode) => {
+      const id = connectionOf(el) ?? (await pickConnection('Inspect which connection?', (s) => s === 'connected'));
+      if (id) InspectView.show(app, id);
+    }),
 
     cmd('connect', async (el?: TreeNode) => {
       const id = connectionOf(el) ?? (await pickConnection('Connect to…', (s) => s !== 'connected'));

@@ -55,6 +55,7 @@ export class QueryService {
       const s0 = performance.now();
       try {
         const raw = await driver.execute(text, { maxRows, signal: opts.signal });
+        this.deps.connections.recordStatement(connectionId, { ms: performance.now() - s0, rows: raw.rows.length });
         results.push({
           index: i,
           sql: text,
@@ -67,6 +68,7 @@ export class QueryService {
         });
         if (SCHEMA_CHANGING.test(text)) schemaChanged = true;
       } catch (e) {
+        this.deps.connections.recordStatement(connectionId, { ms: performance.now() - s0, rows: 0, error: errorMessage(e) });
         if (SCHEMA_CHANGING.test(text)) schemaChanged = true; // it may have half-applied
         results.push({
           index: i, sql: text, columns: [], rows: [], truncated: false,

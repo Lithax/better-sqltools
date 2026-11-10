@@ -44,6 +44,7 @@ export const settings: SettingsReader = {
   connectTimeoutMs: () => 500,
   historyLimit: () => 50,
   defaultDialect: () => 'ansi',
+  showRowCounts: () => false,
 };
 
 export const fakeDescriptor: DriverDescriptor = {

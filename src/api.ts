@@ -13,13 +13,13 @@
 import type { DriverFactory } from './application/ports';
 
 export type {
-  Driver, DriverConfig, DriverEnvironment, DriverFactory, ExecutionContext, Logger, RawStatementResult,
+  ChildrenOptions, Driver, DriverConfig, DriverEnvironment, DriverFactory, ExecutionContext, Logger, RawStatementResult,
 } from './application/ports';
 export type {
-  ConnectionField, DialectInfo, DriverCapabilities, DriverDescriptor, FieldType,
+  ConnectionField, DialectInfo, DriverCapabilities, DriverDescriptor, DriverIcon, FieldType,
 } from './domain/driver-descriptor';
 export type {
-  Catalog, CatalogColumn, CatalogTable, Column, NodeKind, SchemaNode,
+  Catalog, CatalogColumn, CatalogTable, Column, DriverInspection, HealthStatus, InspectItem, InspectSection, NodeKind, SchemaNode,
 } from './domain/model';
 
 export interface BetterSqlToolsApi {

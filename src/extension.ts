@@ -26,6 +26,7 @@ import { ProjectAwareProfiles } from './application/project-profiles';
 import { ProjectConfigService } from './application/project-config-service';
 import { parseToml } from './adapters/toml/toml';
 import { ConfigDiagnostics } from './adapters/vscode/config-diagnostics';
+import { ConnectionDecorations } from './adapters/vscode/connection-decorations';
 import { SettingsGroupRepository } from './adapters/vscode/group-repository';
 import { VsCodeProjectFiles } from './adapters/vscode/project-files';
 import { DriverRegistry } from './application/driver-registry';
@@ -69,7 +70,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
   const connections = new ConnectionManager({
     registry, profiles, secrets, prompter, settings, logger, resolveVariables, env: { logger, resolvePath },
   });
-  const schema = new SchemaService(connections, logger);
+  const schema = new SchemaService(connections, logger, settings);
   const queries = new QueryService({ connections, schema, history, settings, logger });
   const completion = new CompletionService(connections, schema);
   const lint = new LintService(new SqlfluffLinter(() => settings.sqlfluff()), connections, settings);
@@ -99,16 +100,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
   syncDriverContext();
 
   const connectionsTree = new ConnectionsTree(app);
+  const connectionsView = vscode.window.createTreeView('betterSqlTools.connections', {
+    treeDataProvider: connectionsTree,
+    showCollapseAll: true,
+    canSelectMany: true,
+    dragAndDropController: new ConnectionsDragAndDrop(app),
+  });
+  connectionsTree.attach(connectionsView);
+  void vscode.commands.executeCommand('setContext', 'betterSqlTools.filterActive', false);
   const sql: vscode.DocumentSelector = { language: 'sql' };
   context.subscriptions.push(
     logger, storedProfiles, profiles, groupStore, groups, project, projectFiles, new ConfigDiagnostics(project),
-    bindings, linting, connectionsTree, driverHost, drivers.onDidChange(syncDriverContext),
-    vscode.window.createTreeView('betterSqlTools.connections', {
-      treeDataProvider: connectionsTree,
-      showCollapseAll: true,
-      canSelectMany: true,
-      dragAndDropController: new ConnectionsDragAndDrop(app),
-    }),
+    bindings, linting, connectionsTree, connectionsView, new ConnectionDecorations(app), driverHost, drivers.onDidChange(syncDriverContext),
     vscode.window.registerTreeDataProvider('betterSqlTools.drivers', new DriversTree(app)),
     vscode.window.registerWebviewViewProvider(ResultsView.viewId, results, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.languages.registerCompletionItemProvider(sql, new SqlCompletionProvider(app), '.'),

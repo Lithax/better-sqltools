@@ -30,6 +30,14 @@ export class VsCodeSettings implements SettingsReader {
   historyLimit() { return clamp(this.get('history.maxEntries'), 200, 0, 5000); }
   defaultDialect() { return this.get<string>('lint.defaultDialect') || 'ansi'; }
 
+  /** Connections view: the driver's own icon instead of a generic database icon. */
+  explorerDriverIcons() { return this.get<boolean>('explorer.driverIcons', true) !== false; }
+  /** Connections view: the driver's name after the connection's. */
+  explorerShowDriverName() { return this.get<boolean>('explorer.showDriverName', true) !== false; }
+  /** Connections view: how many objects a folder holds. */
+  explorerShowCounts() { return this.get<boolean>('explorer.showCounts', true) !== false; }
+  showRowCounts() { return this.get<boolean>('explorer.showRowCounts', false) === true; }
+
   completionEnabled() { return this.get<boolean>('completion.enabled', true) !== false; }
   codeLensEnabled() { return this.get<boolean>('codeLens.enabled', true) !== false; }
   /** Linting runs an external program, so it waits for workspace trust. */

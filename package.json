@@ -139,6 +139,30 @@
         "category": "Better SQLTools"
       },
       {
+        "command": "betterSqlTools.filterObjects",
+        "title": "Filter Objects…",
+        "category": "Better SQLTools",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "betterSqlTools.clearFilter",
+        "title": "Clear Object Filter",
+        "category": "Better SQLTools",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "betterSqlTools.searchObjects",
+        "title": "Search Tables, Views and Columns…",
+        "category": "Better SQLTools",
+        "icon": "$(search)"
+      },
+      {
+        "command": "betterSqlTools.inspectConnection",
+        "title": "Inspect Connection",
+        "category": "Better SQLTools",
+        "icon": "$(pulse)"
+      },
+      {
         "command": "betterSqlTools.editConnection",
         "title": "Edit Connection",
         "category": "Better SQLTools",
@@ -321,14 +345,29 @@
           "group": "navigation@2"
         },
         {
+          "command": "betterSqlTools.filterObjects",
+          "when": "view == betterSqlTools.connections && !betterSqlTools.filterActive",
+          "group": "navigation@3"
+        },
+        {
+          "command": "betterSqlTools.clearFilter",
+          "when": "view == betterSqlTools.connections && betterSqlTools.filterActive",
+          "group": "navigation@3"
+        },
+        {
           "command": "betterSqlTools.refresh",
           "when": "view == betterSqlTools.connections",
-          "group": "navigation@3"
+          "group": "navigation@4"
         },
         {
           "command": "betterSqlTools.showHistory",
           "when": "view == betterSqlTools.connections",
-          "group": "navigation@4"
+          "group": "navigation@5"
+        },
+        {
+          "command": "betterSqlTools.searchObjects",
+          "when": "view == betterSqlTools.connections",
+          "group": "0_find@1"
         },
         {
           "command": "betterSqlTools.openProjectConfig",
@@ -416,6 +455,16 @@
           "command": "betterSqlTools.renameGroup",
           "when": "view == betterSqlTools.connections && viewItem =~ /^group\\.(user|workspace|implicit)$/",
           "group": "1_group@1"
+        },
+        {
+          "command": "betterSqlTools.inspectConnection",
+          "when": "view == betterSqlTools.connections && viewItem == connection.connected",
+          "group": "3_inspect@1"
+        },
+        {
+          "command": "betterSqlTools.searchObjects",
+          "when": "view == betterSqlTools.connections && viewItem == connection.connected",
+          "group": "3_inspect@2"
         },
         {
           "command": "betterSqlTools.deleteGroup",
@@ -560,6 +609,26 @@
               }
             }
           }
+        },
+        "betterSqlTools.explorer.driverIcons": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show each driver's own icon next to its connections, instead of a generic database icon. A connected connection is shown in green either way."
+        },
+        "betterSqlTools.explorer.showDriverName": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the driver's name after the connection's name, for example SQLite."
+        },
+        "betterSqlTools.explorer.showCounts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show how many tables, views, indexes and so on each folder holds."
+        },
+        "betterSqlTools.explorer.showRowCounts": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show how many rows each table has. Counting rows can be slow on big tables, so this is off by default."
         },
         "betterSqlTools.results.maxRows": {
           "type": "number",

@@ -88,6 +88,10 @@ export interface SchemaNode {
   /** Tables/views: a fully qualified, already quoted name that can be pasted into SQL. */
   qualifiedName?: string;
   primaryKey?: boolean;
+  /** Folders and other containers: how many objects are inside. Shown next to the label when the user wants counts. */
+  count?: number;
+  /** Tables: how many rows. Only filled in when the core asks for row counts (`ChildrenOptions.rowCounts`). */
+  rowCount?: number;
   /** Driver-private payload; handed back to the driver untouched. */
   data?: unknown;
 }
@@ -101,6 +105,8 @@ export interface CatalogColumn {
 export interface CatalogTable {
   schema?: string;
   name: string;
+  /** A fully qualified, already quoted name that can be pasted into SQL. Falls back to `name`. */
+  qualifiedName?: string;
   kind: 'table' | 'view';
   columns: CatalogColumn[];
 }
@@ -147,4 +153,41 @@ export interface ConnectionGroup {
   icon?: string;
   /** A theme colour id, e.g. "charts.blue". */
   color?: string;
+}
+
+// ---- inspecting a connection ----------------------------------------------------
+
+export type HealthStatus = 'ok' | 'warning' | 'error';
+
+export interface InspectItem {
+  label: string;
+  value: string | number | boolean | null;
+  /** Shown after the value: "ms", "MB", "pages". */
+  unit?: string;
+  status?: HealthStatus;
+  /** A tooltip. */
+  hint?: string;
+}
+
+export interface InspectSection {
+  title: string;
+  items: InspectItem[];
+}
+
+/** What a driver can tell about the database behind a connection: version, size, settings, health checks. */
+export interface DriverInspection {
+  health: { status: HealthStatus; summary: string };
+  sections: InspectSection[];
+}
+
+/** What the core measures itself, for every driver, since the session began. */
+export interface SessionStats {
+  connectedAt: number;
+  statements: number;
+  errors: number;
+  rows: number;
+  totalMs: number;
+  lastMs?: number;
+  lastAt?: number;
+  lastError?: string;
 }

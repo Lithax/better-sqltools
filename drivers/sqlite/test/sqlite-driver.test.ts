@@ -148,7 +148,7 @@ test('introspection: tree, catalog and ddl', async () => {
   await d.execute('create trigger trg after insert on users begin select 1; end', ctx);
 
   const root = await d.children();
-  assert.deepEqual(root.map((n) => `${n.label}:${n.description}`), ['Tables:1', 'Views:1', 'Indexes:1', 'Triggers:1']);
+  assert.deepEqual(root.map((n) => `${n.label}:${n.count}`), ['Tables:1', 'Views:1', 'Indexes:1', 'Triggers:1']);
 
   const tables = await d.children(root[0]);
   assert.equal(tables[0].qualifiedName, '"users"');

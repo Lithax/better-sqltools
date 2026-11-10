@@ -88,6 +88,7 @@ export interface MockState {
   webviewViewProviders: Record<string, any>;
   resultsMessages: any[];
   resultsHandler?: Fn;
+  decorationProvider?: any;
   panels: MockPanel[];
   providers: { completion?: any; formatting?: any; codeActions?: any; codeLens?: any };
   diagnostics: Map<string, any[]>;
@@ -176,6 +177,7 @@ export function installVscodeMock(folder: string) {
     Disposable: class { constructor(private f: Fn) {} dispose() { this.f(); } },
     ThemeIcon: class { constructor(readonly id: string, readonly color?: unknown) {} },
     ThemeColor: class { constructor(readonly id: string) {} },
+    FileDecoration: class { constructor(readonly badge?: string, readonly tooltip?: string, readonly color?: unknown) {} },
     FileType: { File: 1, Directory: 2, SymbolicLink: 64 },
     RelativePattern: class { constructor(readonly base: any, readonly pattern: string) {} },
     DataTransferItem: class { constructor(readonly value: unknown) {} async asString() { return JSON.stringify(this.value); } },
@@ -229,6 +231,7 @@ export function installVscodeMock(folder: string) {
       createTreeView: (id: string, o: any) => { state.treeProviders[id] = o.treeDataProvider; state.treeViewOptions[id] = o; return { dispose() {} }; },
       registerTreeDataProvider: (id: string, p: any) => { state.treeProviders[id] = p; return { dispose() {} }; },
       registerWebviewViewProvider: (id: string, p: any) => { state.webviewViewProviders[id] = p; return { dispose() {} }; },
+      registerFileDecorationProvider: (p: any) => { state.decorationProvider = p; return { dispose() {} }; },
       createStatusBarItem: () => ({
         set text(v: string) { state.statusBar.text = v; }, get text() { return state.statusBar.text ?? ''; },
         tooltip: '', command: '', show() { state.statusBar.hidden = false; }, hide() { state.statusBar.hidden = true; }, dispose() {},
@@ -242,6 +245,7 @@ export function installVscodeMock(folder: string) {
       showInformationMessage: message('info'),
       showWarningMessage: message('warning'),
       showErrorMessage: message('error'),
+      setStatusBarMessage: () => ({ dispose() {} }),
       withProgress: async (_o: unknown, task: Fn) => task({ report() {} }, { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) }),
       showOpenDialog: async () => { const p = state.openDialogAnswers.shift(); return p ? [Uri.file(p)] : undefined; },
       showSaveDialog: async () => { const p = state.saveDialogAnswers.shift(); return p ? Uri.file(p) : undefined; },

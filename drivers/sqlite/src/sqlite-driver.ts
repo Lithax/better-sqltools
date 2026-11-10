@@ -1,9 +1,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import initSqlJs, { type Database, type SqlJsStatic, type SqlValue } from 'sql.js';
-import type { Catalog, CatalogTable, SchemaNode } from '../../../src/api';
+import type { Catalog, CatalogTable, DriverInspection, InspectItem, SchemaNode } from '../../../src/api';
 import type {
-  Driver, DriverConfig, DriverEnvironment, DriverFactory, ExecutionContext, RawStatementResult,
+  ChildrenOptions, Driver, DriverConfig, DriverEnvironment, DriverFactory, ExecutionContext, RawStatementResult,
 } from '../../../src/api';
 import { sqliteDescriptor } from './descriptor';
 
@@ -121,16 +121,16 @@ class SqliteDriver implements Driver {
     return result;
   }
 
-  async children(parent?: SchemaNode): Promise<SchemaNode[]> {
+  async children(parent?: SchemaNode, options?: ChildrenOptions): Promise<SchemaNode[]> {
     this.requireDb();
     if (!parent) {
       const count = (types: string[]) =>
         Number(this.scalar(`SELECT count(*) FROM sqlite_master WHERE type IN (${types.map(() => '?').join(',')}) AND name NOT LIKE 'sqlite_%'`, types));
       return [
-        { id: 'folder:tables', kind: 'folder', label: 'Tables', description: String(count(['table'])), expandable: true },
-        { id: 'folder:views', kind: 'folder', label: 'Views', description: String(count(['view'])), expandable: true },
-        { id: 'folder:indexes', kind: 'folder', label: 'Indexes', description: String(count(['index'])), expandable: true },
-        { id: 'folder:triggers', kind: 'folder', label: 'Triggers', description: String(count(['trigger'])), expandable: true },
+        { id: 'folder:tables', kind: 'folder', label: 'Tables', count: count(['table']), expandable: true },
+        { id: 'folder:views', kind: 'folder', label: 'Views', count: count(['view']), expandable: true },
+        { id: 'folder:indexes', kind: 'folder', label: 'Indexes', count: count(['index']), expandable: true },
+        { id: 'folder:triggers', kind: 'folder', label: 'Triggers', count: count(['trigger']), expandable: true },
       ];
     }
 
@@ -144,6 +144,7 @@ class SqliteDriver implements Driver {
           label: String(r.name),
           expandable: true,
           qualifiedName: quoteIdent(String(r.name)),
+          ...(options?.rowCounts ? { rowCount: this.rowCount(String(r.name)) } : {}),
           data: { name: r.name },
         }));
       }
@@ -185,14 +186,84 @@ class SqliteDriver implements Driver {
     for (const r of rows) {
       const name = String(r.t);
       let t = tables.get(name);
-      if (!t) tables.set(name, (t = { name, kind: r.k === 'view' ? 'view' : 'table', columns: [] }));
+      if (!t) tables.set(name, (t = { name, qualifiedName: quoteIdent(name), kind: r.k === 'view' ? 'view' : 'table', columns: [] }));
       t.columns.push({ name: String(r.c), type: r.ty ? String(r.ty) : undefined, primaryKey: Number(r.pk) > 0, nullable: !Number(r.nn) });
     }
     // Empty tables/views have no pragma rows; list them anyway.
     for (const r of this.all("SELECT name, type FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'")) {
-      if (!tables.has(String(r.name))) tables.set(String(r.name), { name: String(r.name), kind: r.type === 'view' ? 'view' : 'table', columns: [] });
+      if (!tables.has(String(r.name))) tables.set(String(r.name), { name: String(r.name), qualifiedName: quoteIdent(String(r.name)), kind: r.type === 'view' ? 'view' : 'table', columns: [] });
     }
     return { tables: [...tables.values()], defaultSchema: 'main' };
+  }
+
+  async ping(): Promise<void> {
+    this.scalar('SELECT 1');
+  }
+
+  async inspect(): Promise<DriverInspection> {
+    this.requireDb();
+    const pragma = (name: string) => this.scalar(`PRAGMA ${name}`);
+    const num = (v: SqlValue) => Number(v ?? 0);
+    const pageSize = num(pragma('page_size'));
+    const pages = num(pragma('page_count'));
+    const free = num(pragma('freelist_count'));
+    const objects = (type: string) => num(this.scalar("SELECT count(*) FROM sqlite_master WHERE type = ? AND name NOT LIKE 'sqlite_%'", [type]));
+
+    // health: SQLite's own checks. quick_check skips the index-versus-table comparison, which is plenty here.
+    const integrity = this.all('PRAGMA quick_check(5)').map((r) => String(Object.values(r)[0]));
+    const intact = integrity.length === 1 && integrity[0] === 'ok';
+    const violations = this.all('PRAGMA foreign_key_check').length;
+    let onDisk: number | undefined;
+    let changedBehindOurBack = false;
+    if (this.file) {
+      const st = await fs.promises.stat(this.file).catch(() => undefined);
+      onDisk = st?.size;
+      changedBehindOurBack = !!st && this.mtimeMs !== undefined && Math.abs(st.mtimeMs - this.mtimeMs) > 1;
+    }
+
+    const health: DriverInspection['health'] = !intact
+      ? { status: 'error', summary: 'The integrity check found problems.' }
+      : violations
+        ? { status: 'warning', summary: `${violations} foreign key violation${violations === 1 ? '' : 's'}.` }
+        : changedBehindOurBack
+          ? { status: 'warning', summary: 'The file changed on disk after it was opened; reconnect to reload it.' }
+          : { status: 'ok', summary: 'Integrity check passed.' };
+
+    const item = (label: string, value: InspectItem['value'], extra: Partial<InspectItem> = {}): InspectItem => ({ label, value, ...extra });
+    return {
+      health,
+      sections: [
+        {
+          title: 'Database',
+          items: [
+            item('SQLite version', String(this.scalar('SELECT sqlite_version()'))),
+            item('File', this.file ?? ':memory:'),
+            ...(onDisk !== undefined ? [item('Size on disk', Math.round(onDisk / 1024), { unit: 'KB' })] : []),
+            item('Size in memory', Math.round((pageSize * pages) / 1024), { unit: 'KB', hint: 'sql.js keeps the whole database in memory.' }),
+            item('Access', this.opts.readOnly ? 'read-only' : 'read and write'),
+            item('Text encoding', String(pragma('encoding'))),
+            item('Page size', pageSize, { unit: 'bytes' }),
+            item('Pages', pages, { hint: `${free} of them are free.` }),
+            item('Free pages', free, { status: pages && free / pages > 0.5 ? 'warning' : undefined, hint: 'VACUUM gives them back.' }),
+            item('user_version', num(pragma('user_version'))),
+          ],
+        },
+        {
+          title: 'Objects',
+          items: [item('Tables', objects('table')), item('Views', objects('view')), item('Indexes', objects('index')), item('Triggers', objects('trigger'))],
+        },
+        {
+          title: 'Checks',
+          items: [
+            item('Integrity (quick_check)', intact ? 'ok' : integrity.join('; '), { status: intact ? 'ok' : 'error' }),
+            item('Foreign key violations', violations, { status: violations ? 'warning' : 'ok' }),
+            item('Foreign keys enforced', num(pragma('foreign_keys')) === 1),
+            item('Unsaved changes', this.dirty),
+            ...(this.file ? [item('File unchanged on disk', !changedBehindOurBack, { status: changedBehindOurBack ? 'warning' : 'ok' })] : []),
+          ],
+        },
+      ],
+    };
   }
 
   async ddl(node: SchemaNode): Promise<string> {
@@ -207,6 +278,15 @@ class SqliteDriver implements Driver {
   }
 
   // ---- helpers -----------------------------------------------------------------
+
+  /** Rows in a table. A count that fails (a broken view, say) just shows nothing. */
+  private rowCount(table: string): number | undefined {
+    try {
+      return Number(this.scalar(`SELECT count(*) FROM ${quoteIdent(table)}`));
+    } catch {
+      return undefined;
+    }
+  }
 
   private requireDb(): Database {
     if (!this.db) throw new Error('The database is not open.');

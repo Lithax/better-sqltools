@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 
 /** The page shell for our webviews: strict CSP, theme-aware CSS, one script. Pages live in /media. */
-export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, page: 'results' | 'connection-form', title: string): string {
+export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, page: 'results' | 'connection-form' | 'inspect', title: string): string {
   const nonce = randomBytes(16).toString('base64');
   const asset = (file: string) => webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', file));
   return `<!DOCTYPE html>

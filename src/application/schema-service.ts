@@ -2,7 +2,7 @@ import type { Catalog, CatalogTable, ConnectionId, SchemaNode } from '../domain/
 import { errorMessage } from '../domain/errors';
 import type { ConnectionManager } from './connection-manager';
 import { Emitter } from './events';
-import type { Driver, Logger } from './ports';
+import type { Driver, Logger, SettingsReader } from './ports';
 
 /** Builds a catalog for drivers that only implement `children`. */
 export async function walkCatalog(driver: Driver, maxNodes = 5000): Promise<Catalog> {
@@ -42,6 +42,7 @@ export class SchemaService {
   constructor(
     private readonly connections: ConnectionManager,
     private readonly logger: Logger,
+    private readonly settings?: Pick<SettingsReader, 'showRowCounts'>,
   ) {
     connections.onDidChange((e) => {
       if (e.id && (e.state === 'disconnected' || e.state === 'error')) this.catalogs.delete(e.id);
@@ -50,7 +51,7 @@ export class SchemaService {
   }
 
   async children(id: ConnectionId, parent?: SchemaNode): Promise<SchemaNode[]> {
-    return (await this.connections.ensure(id)).driver.children(parent);
+    return (await this.connections.ensure(id)).driver.children(parent, { rowCounts: this.settings?.showRowCounts() ?? false });
   }
 
   async ddl(id: ConnectionId, node: SchemaNode): Promise<string | undefined> {

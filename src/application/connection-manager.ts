@@ -2,7 +2,7 @@ import type { DriverDescriptor } from '../domain/driver-descriptor';
 import {
   BetterSqlToolsError, CancelledError, ValidationError, errorMessage,
 } from '../domain/errors';
-import type { ConnectionId, ConnectionProfile } from '../domain/model';
+import type { ConnectionId, ConnectionProfile, DriverInspection, SessionStats } from '../domain/model';
 import { normalizeOptions } from '../domain/validation';
 import type { DriverRegistry } from './driver-registry';
 import { Emitter } from './events';
@@ -25,6 +25,23 @@ export interface Session {
   descriptor: DriverDescriptor;
   driver: Driver;
   connectedAt: number;
+  /** Counters the core keeps for every driver; see `inspect`. */
+  stats: SessionStats;
+}
+
+/** What "Inspect connection" shows: what the core measured, plus what the driver can tell. */
+export interface ConnectionInspection {
+  id: ConnectionId;
+  name: string;
+  driverId: string;
+  driverName: string;
+  uptimeMs: number;
+  stats: SessionStats;
+  /** A timed round trip, for drivers that can `ping`. */
+  pingMs?: number;
+  driver?: DriverInspection;
+  /** The driver has `inspect` but it threw. */
+  driverError?: string;
 }
 
 /** A not-yet-saved connection, e.g. from the form's "Test connection" button. */
@@ -83,6 +100,57 @@ export class ConnectionManager {
   info(id: ConnectionId): ConnectionInfo | undefined {
     const p = this.deps.profiles.list().find((x) => x.id === id);
     return p ? this.describe(p) : undefined;
+  }
+
+  /** Called by the query service after every statement, for the numbers "Inspect connection" shows. */
+  recordStatement(id: ConnectionId, r: { ms: number; rows: number; error?: string }): void {
+    const st = this.sessions.get(id)?.stats;
+    if (!st) return;
+    st.statements++;
+    st.rows += r.rows;
+    st.totalMs += r.ms;
+    st.lastMs = r.ms;
+    st.lastAt = Date.now();
+    if (r.error !== undefined) {
+      st.errors++;
+      st.lastError = r.error;
+    }
+  }
+
+  /** Only for a connection that is open: this never connects on its own. */
+  async inspect(id: ConnectionId): Promise<ConnectionInspection> {
+    const s = this.sessions.get(id);
+    if (!s) throw new BetterSqlToolsError('This connection is not open. Connect first.', 'NOT_CONNECTED');
+    let pingMs: number | undefined;
+    if (s.driver.ping) {
+      const t = performance.now();
+      try {
+        await s.driver.ping();
+        pingMs = performance.now() - t;
+      } catch {
+        // a failing ping shows up as a missing value; the driver's own inspection usually says why
+      }
+    }
+    let driver: DriverInspection | undefined;
+    let driverError: string | undefined;
+    if (s.driver.inspect) {
+      try {
+        driver = await s.driver.inspect();
+      } catch (e) {
+        driverError = errorMessage(e);
+      }
+    }
+    return {
+      id,
+      name: s.profile.name,
+      driverId: s.profile.driver,
+      driverName: s.descriptor.displayName,
+      uptimeMs: Date.now() - s.stats.connectedAt,
+      stats: { ...s.stats },
+      pingMs,
+      driver,
+      driverError,
+    };
   }
 
   session(id: ConnectionId): Session | undefined {
@@ -159,7 +227,11 @@ export class ConnectionManager {
     this.emit(id, 'connecting');
     try {
       const { driver, descriptor } = await this.openDriver(profile, {});
-      const session: Session = { profile, descriptor, driver, connectedAt: Date.now() };
+      const connectedAt = Date.now();
+      const session: Session = {
+        profile, descriptor, driver, connectedAt,
+        stats: { connectedAt, statements: 0, errors: 0, rows: 0, totalMs: 0 },
+      };
       this.sessions.set(id, session);
       this.connecting.delete(id);
       this.deps.logger.info(`Connected to "${profile.name}" (${descriptor.displayName}).`);

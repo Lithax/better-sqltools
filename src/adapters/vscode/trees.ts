@@ -4,6 +4,8 @@ import type { DriverEntry } from '../../application/driver-directory';
 import type { ConnectionId, SchemaNode } from '../../domain/model';
 import type { App } from './app';
 import { treeIcon } from './driver-icons';
+import { connectionUri } from './connection-decorations';
+import { matchesFilter } from '../../domain/filter';
 
 export type TreeNode =
   | { type: 'group'; id: string }
@@ -30,7 +32,10 @@ const connectCommand = (id: ConnectionId): vscode.Command => ({
   arguments: [{ type: 'connection', id } satisfies TreeNode],
 });
 
-type TreeDeps = Pick<App, 'connections' | 'schema' | 'registry' | 'drivers' | 'groups' | 'logger'>;
+type TreeDeps = Pick<App, 'connections' | 'schema' | 'registry' | 'drivers' | 'groups' | 'settings' | 'logger'>;
+
+/** Kinds that are objects in their own right; the rest are containers (folders, schemas) or parts of a table. */
+const OBJECT_KINDS = new Set<SchemaNode['kind']>(['table', 'view', 'index', 'trigger', 'routine', 'sequence', 'other']);
 
 /**
  * Groups, their connections and the connections' schema objects. A connection only has children while
@@ -41,10 +46,15 @@ export class ConnectionsTree implements vscode.TreeDataProvider<TreeNode>, vscod
   private readonly emitter = new vscode.EventEmitter<TreeNode | undefined>();
   readonly onDidChangeTreeData = this.emitter.event;
   private readonly subs: { dispose(): void }[];
+  private filter = '';
+  private view?: vscode.TreeView<TreeNode>;
 
   constructor(private readonly app: TreeDeps) {
     this.subs = [
       this.emitter,
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration('betterSqlTools.explorer')) this.refresh();
+      }),
       app.connections.onDidChange(() => this.refresh()),
       app.registry.onDidChange(() => this.refresh()),
       app.drivers.onDidChange(() => this.refresh()),
@@ -55,6 +65,19 @@ export class ConnectionsTree implements vscode.TreeDataProvider<TreeNode>, vscod
   }
 
   dispose() { this.subs.forEach((s) => s.dispose()); }
+
+  /** So the view can say which filter is active. */
+  attach(view: vscode.TreeView<TreeNode>) { this.view = view; }
+
+  get activeFilter(): string { return this.filter; }
+
+  /** Show only objects whose name matches; an empty text clears the filter. */
+  setFilter(text: string) {
+    this.filter = text.trim();
+    void vscode.commands.executeCommand('setContext', 'betterSqlTools.filterActive', this.filter !== '');
+    if (this.view) this.view.description = this.filter ? `filter: ${this.filter}` : undefined;
+    this.refresh();
+  }
 
   /** VS Code only re-reads children when told to; `undefined` refreshes everything. */
   refresh(node?: TreeNode) { this.emitter.fire(node); }
@@ -79,12 +102,37 @@ export class ConnectionsTree implements vscode.TreeDataProvider<TreeNode>, vscod
     const connectionId = el.type === 'connection' ? el.id : el.connectionId;
     try {
       const nodes = await this.app.schema.children(connectionId, el.type === 'node' ? el.node : undefined);
-      return nodes.map((node) => ({ type: 'node', connectionId, node }));
+      const shown = this.filter ? await this.filtered(connectionId, nodes) : nodes;
+      return shown.map((node) => ({ type: 'node', connectionId, node }));
     } catch (e) {
       this.app.logger.error(`Loading schema failed: ${errorMessage(e)}`);
       void vscode.window.showErrorMessage(`Could not load schema objects: ${errorMessage(e)}`);
       return [];
     }
+  }
+
+  /** Objects whose name matches, and the containers that hold at least one; a table's columns stay with it. */
+  private async filtered(connectionId: ConnectionId, nodes: SchemaNode[]): Promise<SchemaNode[]> {
+    const out: SchemaNode[] = [];
+    for (const n of nodes) {
+      if (n.kind === 'column') out.push(n);
+      else if (OBJECT_KINDS.has(n.kind)) {
+        if (matchesFilter(n.label, this.filter)) out.push(n);
+      } else if (await this.holdsMatch(connectionId, n)) out.push(n);
+    }
+    return out;
+  }
+
+  private async holdsMatch(connectionId: ConnectionId, container: SchemaNode, depth = 0): Promise<boolean> {
+    if (depth > 3) return true; // stop digging; show it and let the user look
+    for (const k of await this.app.schema.children(connectionId, container)) {
+      if (OBJECT_KINDS.has(k.kind)) {
+        if (matchesFilter(k.label, this.filter)) return true;
+      } else if (k.kind !== 'column' && k.expandable && (await this.holdsMatch(connectionId, k, depth + 1))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private roots(): TreeNode[] {
@@ -124,8 +172,13 @@ export class ConnectionsTree implements vscode.TreeDataProvider<TreeNode>, vscod
       n.expandable ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
     );
     item.id = `${el.connectionId}/${n.id}`;
-    item.description = n.description;
-    item.tooltip = n.tooltip ?? (n.description ? `${n.label}: ${n.description}` : n.label);
+    // a folder's count, a table's rows, then whatever the driver says; the user decides which counts they want
+    const parts: string[] = [];
+    if (n.count !== undefined && this.app.settings.explorerShowCounts() && !this.filter) parts.push(String(n.count));
+    if (n.description) parts.push(n.description);
+    if (n.rowCount !== undefined && this.app.settings.showRowCounts()) parts.push(`${n.rowCount.toLocaleString()} ${n.rowCount === 1 ? 'row' : 'rows'}`);
+    item.description = parts.join(' \u00b7 ') || undefined;
+    item.tooltip = n.tooltip ?? (item.description ? `${n.label}: ${item.description}` : n.label);
     item.contextValue = `node.${n.kind}`;
     item.iconPath = new vscode.ThemeIcon(n.primaryKey ? 'key' : (KIND_ICON[n.kind] ?? 'symbol-misc'));
     return item;
@@ -167,11 +220,13 @@ export class ConnectionsTree implements vscode.TreeDataProvider<TreeNode>, vscod
 
     item.id = `connection/${id}/${info.state}`;
     item.contextValue = `connection.${info.state}`;
-    item.description = driverName;
+    item.description = this.app.settings.explorerShowDriverName() ? driverName : undefined;
+    const driverIcons = this.app.settings.explorerDriverIcons();
+    if (driverIcons) item.resourceUri = connectionUri(id); // lets the state colour the label; see ConnectionDecorations
     switch (info.state) {
       case 'connected':
         item.collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
-        item.iconPath = new vscode.ThemeIcon('database', new vscode.ThemeColor('charts.green'));
+        item.iconPath = driverIcons ? treeIcon(driver) : new vscode.ThemeIcon('database', new vscode.ThemeColor('charts.green'));
         break;
       case 'connecting':
         item.iconPath = new vscode.ThemeIcon('loading~spin');
@@ -183,7 +238,7 @@ export class ConnectionsTree implements vscode.TreeDataProvider<TreeNode>, vscod
         item.command = connectCommand(id);
         break;
       default:
-        item.iconPath = new vscode.ThemeIcon('database', new vscode.ThemeColor('disabledForeground'));
+        item.iconPath = driverIcons ? treeIcon(driver) : new vscode.ThemeIcon('database', new vscode.ThemeColor('disabledForeground'));
         item.command = connectCommand(id);
     }
     return item;
