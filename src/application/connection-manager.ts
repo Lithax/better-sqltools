@@ -205,7 +205,7 @@ export class ConnectionManager {
     return { driver, descriptor };
   }
 
-  /** typed value → stored secret → value written inline in settings → prompt. */
+  /** typed value → stored secret → value written inline in settings or a project file (variables expanded) → prompt. */
   private async collectSecrets(
     profile: ConnectionProfile,
     descriptor: DriverDescriptor,
@@ -215,7 +215,9 @@ export class ConnectionManager {
     for (const f of descriptor.connectionSchema) {
       if (f.type !== 'password') continue;
       const inline = profile.options[f.key];
-      let v: string | undefined = typed[f.key] ?? (await this.deps.secrets.get(profile.id, f.key)) ?? (typeof inline === 'string' ? inline : undefined);
+      const fromSettings = typeof inline === 'string' ? this.deps.resolveVariables(inline) : undefined;
+      // "${env:UNSET}" must prompt, not become an empty password
+      let v: string | undefined = typed[f.key] ?? (await this.deps.secrets.get(profile.id, f.key)) ?? (fromSettings === '' && inline !== '' ? undefined : fromSettings);
       if (v === undefined && f.required) {
         v = await this.deps.prompter.prompt({ profileName: profile.name, field: f });
         if (v === undefined) throw new CancelledError();

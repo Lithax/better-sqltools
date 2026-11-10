@@ -237,3 +237,18 @@ test('lint dialect follows the connection, else the setting', async () => {
   assert.equal(lint.dialectFor(), 'ansi');
   assert.equal(await lint.fix({ text: '', connectionId: 'c1' }), 'postgres');
 });
+
+test('connect: variables in an inline password are expanded; an unset one prompts instead of becoming an empty password', async () => {
+  const h = harness({ prompt: 'typed' });
+  h.registry.register(fakeFactory(h.state));
+  await h.profiles.save({ ...h.profile, options: { host: 'x', password: 'pw-${home}' } });
+  await h.connections.connect('c1');
+  assert.equal(h.state.config?.secrets.password, 'pw-/home/test');
+  assert.deepEqual(h.prompts, []);
+
+  await h.connections.disconnect('c1');
+  await h.profiles.save({ ...h.profile, options: { host: 'x', password: '${unset}' } });
+  await h.connections.connect('c1');
+  assert.deepEqual(h.prompts, ['password']);
+  assert.equal(h.state.config?.secrets.password, 'typed');
+});

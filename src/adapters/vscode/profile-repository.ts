@@ -1,20 +1,25 @@
 import * as vscode from 'vscode';
 import { Emitter } from '../../application/events';
 import type { ProfileRepository } from '../../application/ports';
-import type { ConnectionId, ConnectionProfile, ProfileScope } from '../../domain/model';
+import type { ConnectionId, ConnectionProfile } from '../../domain/model';
+import { slugify } from '../../domain/slug';
 
 const SECTION = 'betterSqlTools';
 const KEY = 'connections';
+
+/** The two places settings can store a profile. Project files are read-only and handled elsewhere. */
+type StoredScope = 'user' | 'workspace';
 
 /** The shape written to settings.json. Hand-written entries may omit `id`. */
 interface Stored {
   id?: string;
   name: string;
   driver: string;
+  group?: string;
   options?: Record<string, unknown>;
 }
 
-export const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'connection';
+export const slug = (s: string) => slugify(s, 'connection');
 const idOf = (p: Stored) => p.id ?? slug(p.name);
 
 /**
@@ -41,13 +46,13 @@ export class SettingsProfileRepository implements ProfileRepository, vscode.Disp
     this.emitter.fire();
   }
 
-  private read(scope: ProfileScope): Stored[] {
+  private read(scope: StoredScope): Stored[] {
     const i = vscode.workspace.getConfiguration(SECTION).inspect<Stored[]>(KEY);
     const v = scope === 'user' ? i?.globalValue : i?.workspaceValue;
     return Array.isArray(v) ? [...v] : [];
   }
 
-  private async write(scope: ProfileScope, items: Stored[]) {
+  private async write(scope: StoredScope, items: Stored[]) {
     await vscode.workspace
       .getConfiguration(SECTION)
       .update(KEY, items.length ? items : undefined, scope === 'user' ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace);
@@ -66,15 +71,15 @@ export class SettingsProfileRepository implements ProfileRepository, vscode.Disp
         let id = idOf(p);
         while (seen.has(id)) id += '_';
         seen.add(id);
-        out.push({ id, name: p.name, driver: p.driver, options: { ...(p.options ?? {}) }, scope });
+        out.push({ id, name: p.name, driver: p.driver, options: { ...(p.options ?? {}) }, scope, ...(typeof p.group === 'string' && p.group ? { group: p.group } : {}) });
       }
     }
     return out;
   }
 
   async save(profile: ConnectionProfile): Promise<void> {
-    const scope = profile.scope ?? 'user';
-    const stored: Stored = { id: profile.id, name: profile.name, driver: profile.driver, options: profile.options };
+    const scope: StoredScope = profile.scope === 'workspace' ? 'workspace' : 'user';
+    const stored: Stored = { id: profile.id, name: profile.name, driver: profile.driver, ...(profile.group ? { group: profile.group } : {}), options: profile.options };
     const mine = this.read(scope);
     const at = mine.findIndex((p) => idOf(p) === profile.id);
     if (at >= 0) mine[at] = stored;
@@ -83,7 +88,7 @@ export class SettingsProfileRepository implements ProfileRepository, vscode.Disp
     this.cache = undefined;
 
     // Editing may have moved the profile between user and workspace settings.
-    const other: ProfileScope = scope === 'user' ? 'workspace' : 'user';
+    const other: StoredScope = scope === 'user' ? 'workspace' : 'user';
     const theirs = this.read(other);
     const rest = theirs.filter((p) => idOf(p) !== profile.id);
     if (rest.length !== theirs.length) await this.write(other, rest);

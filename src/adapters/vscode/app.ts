@@ -11,7 +11,9 @@ import type { EditorBindings } from './bindings';
 import type { LintController } from './diagnostics';
 import type { VsCodeLogger } from './logger';
 import type { VsCodeSecretStore } from './secret-store';
-import type { SettingsProfileRepository } from './profile-repository';
+import type { GroupService } from '../../application/group-service';
+import type { ProfileRepository } from '../../application/ports';
+import type { ProjectConfigService } from '../../application/project-config-service';
 import type { QueryRunner } from './runner';
 import type { VsCodeSettings } from './settings';
 
@@ -27,7 +29,9 @@ export interface App {
   queries: QueryService;
   completion: CompletionService;
   lint: LintService;
-  profiles: SettingsProfileRepository;
+  profiles: ProfileRepository;
+  groups: GroupService;
+  project: ProjectConfigService;
   secrets: VsCodeSecretStore;
   history: HistoryRepository;
   bindings: EditorBindings;

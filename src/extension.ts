@@ -16,11 +16,18 @@ import { ResultsView } from './adapters/vscode/results-view';
 import { VsCodeSecretStore } from './adapters/vscode/secret-store';
 import { VsCodeSettings } from './adapters/vscode/settings';
 import { ConnectionStatusBar } from './adapters/vscode/status-bar';
-import { ConnectionsTree, DriversTree } from './adapters/vscode/trees';
+import { ConnectionsDragAndDrop, ConnectionsTree, DriversTree } from './adapters/vscode/trees';
 import { resolvePath, resolveVariables } from './adapters/vscode/variables';
 import { CompletionService } from './application/completion-service';
 import { ConnectionManager } from './application/connection-manager';
 import { DriverDirectory } from './application/driver-directory';
+import { GroupService } from './application/group-service';
+import { ProjectAwareProfiles } from './application/project-profiles';
+import { ProjectConfigService } from './application/project-config-service';
+import { parseToml } from './adapters/toml/toml';
+import { ConfigDiagnostics } from './adapters/vscode/config-diagnostics';
+import { SettingsGroupRepository } from './adapters/vscode/group-repository';
+import { VsCodeProjectFiles } from './adapters/vscode/project-files';
 import { DriverRegistry } from './application/driver-registry';
 import { LintService } from './application/lint-service';
 import type { SecretPrompter } from './application/ports';
@@ -29,12 +36,25 @@ import { SchemaService } from './application/schema-service';
 
 let shutdown: (() => Promise<void>) | undefined;
 
+/** The settings this extension declares, without the prefix, that a project file may set. */
+function knownSettings(context: vscode.ExtensionContext): ReadonlySet<string> | undefined {
+  const cfg = context.extension?.packageJSON?.contributes?.configuration;
+  const blocks: { properties?: Record<string, unknown> }[] = Array.isArray(cfg) ? cfg : cfg ? [cfg] : [];
+  const keys = blocks.flatMap((b) => Object.keys(b.properties ?? {})).map((k) => k.replace(/^betterSqlTools\./, ''));
+  return keys.length ? new Set(keys.filter((k) => k !== 'connections' && k !== 'groups')) : undefined;
+}
+
 /** Composition root: the only place that knows every adapter. */
 export async function activate(context: vscode.ExtensionContext): Promise<BetterSqlToolsApi> {
   // driven side
   const logger = new VsCodeLogger();
-  const settings = new VsCodeSettings();
-  const profiles = new SettingsProfileRepository();
+  const projectFiles = new VsCodeProjectFiles();
+  const project = new ProjectConfigService(projectFiles, parseToml, () => knownSettings(context), logger);
+  const settings = new VsCodeSettings(() => project.current().settings);
+  const storedProfiles = new SettingsProfileRepository();
+  const profiles = new ProjectAwareProfiles(storedProfiles, project);
+  const groupStore = new SettingsGroupRepository();
+  const groups = new GroupService({ groups: groupStore, project, profiles });
   const secrets = new VsCodeSecretStore(context.secrets);
   const history = new VsCodeHistory(context.globalState, () => settings.historyLimit());
   const prompter: SecretPrompter = {
@@ -69,7 +89,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
   const linting = new LintController({ lint, bindings, settings, logger });
 
   const app: App = {
-    context, logger, settings, registry, drivers, connections, schema, queries, completion, lint,
+    context, logger, settings, registry, drivers, project, groups, connections, schema, queries, completion, lint,
     profiles, secrets, history, bindings, runner, linting,
   };
 
@@ -81,8 +101,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
   const connectionsTree = new ConnectionsTree(app);
   const sql: vscode.DocumentSelector = { language: 'sql' };
   context.subscriptions.push(
-    logger, profiles, bindings, linting, connectionsTree, driverHost, drivers.onDidChange(syncDriverContext),
-    vscode.window.createTreeView('betterSqlTools.connections', { treeDataProvider: connectionsTree, showCollapseAll: true }),
+    logger, storedProfiles, profiles, groupStore, groups, project, projectFiles, new ConfigDiagnostics(project),
+    bindings, linting, connectionsTree, driverHost, drivers.onDidChange(syncDriverContext),
+    vscode.window.createTreeView('betterSqlTools.connections', {
+      treeDataProvider: connectionsTree,
+      showCollapseAll: true,
+      canSelectMany: true,
+      dragAndDropController: new ConnectionsDragAndDrop(app),
+    }),
     vscode.window.registerTreeDataProvider('betterSqlTools.drivers', new DriversTree(app)),
     vscode.window.registerWebviewViewProvider(ResultsView.viewId, results, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.languages.registerCompletionItemProvider(sql, new SqlCompletionProvider(app), '.'),
@@ -90,12 +116,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
     vscode.languages.registerCodeActionsProvider(sql, new SqlFixActions(), SqlFixActions.metadata),
     vscode.languages.registerCodeLensProvider(sql, new SqlCodeLensProvider(app)),
     new ConnectionStatusBar(app),
-    vscode.workspace.onDidGrantWorkspaceTrust(() => profiles.refresh()),
+    vscode.workspace.onDidGrantWorkspaceTrust(() => storedProfiles.refresh()),
     ...registerCommands(app, connectionsTree),
   );
 
   shutdown = () => connections.disconnectAll();
   logger.info('Better SQLTools is ready.');
+  void project.reload(); // .better-sqltools.toml and .better-sqltools/*.toml
 
   // Wake installed driver extensions once we are done activating: a driver depends on this extension,
   // so activating it from inside activate() would wait for us to finish while we wait for it.

@@ -47,6 +47,10 @@ To install them for real: `npm run package` and `npm run package:sqlite`, then
   needs it, and shows its icon. A *Drivers* view lists what is installed and what failed to load. Connections whose driver
   is missing stay in the list, flagged, and come alive when it is installed. *Find Drivers* searches the Marketplace for
   extensions tagged `better-sqltools-driver`.
+* **Groups and project config.** File connections under groups ("personal", "global", "arom-backend"): create them
+  from the view, drag connections in, or use *Move to Group*. A project can also carry its own configuration in a
+  `.better-sqltools.toml` (or a `.better-sqltools/` folder of `*.toml` files): connections, groups and any extension
+  setting, versioned with the code. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ## Architecture
 
@@ -84,6 +88,7 @@ uses. See [docs/WRITING_A_DRIVER.md](docs/WRITING_A_DRIVER.md).
 | Setting | Default | |
 | --- | --- | --- |
 | `betterSqlTools.connections` | `[]` | Saved connections (no passwords). |
+| `betterSqlTools.groups` | `[]` | Groups the connections are filed under. |
 | `betterSqlTools.results.maxRows` | `1000` | Rows loaded per statement. |
 | `betterSqlTools.connection.timeoutMs` | `30000` | Connect timeout; `0` waits forever. |
 | `betterSqlTools.history.maxEntries` | `200` | Queries kept. |
@@ -98,6 +103,9 @@ uses. See [docs/WRITING_A_DRIVER.md](docs/WRITING_A_DRIVER.md).
 
 **Workspace trust.** Linting runs an external program and workspace-defined connections can point anywhere, so in an
 untrusted workspace linting is off and `connections`, `sqlfluffPath` and `sqlfluffArgs` from workspace settings are ignored.
+A project's `.better-sqltools.toml` is not read at all until the workspace is trusted.
+
+**Precedence.** A value in a project's `[settings]` wins over workspace settings, which win over user settings.
 
 ## Development
 

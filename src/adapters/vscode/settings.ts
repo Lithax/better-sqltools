@@ -7,25 +7,37 @@ const clamp = (v: unknown, d: number, min: number, max: number) =>
 
 export type LintMode = 'onType' | 'onSave' | 'manual';
 
-/** Reads `betterSqlTools.*` live, so setting changes apply without a reload. */
+/**
+ * Reads `betterSqlTools.*` live, so setting changes apply without a reload. Values a project's TOML file sets
+ * (`[settings]`) win over VS Code's user and workspace settings; `overlay` supplies them.
+ */
 export class VsCodeSettings implements SettingsReader {
+  constructor(private readonly overlay: () => Record<string, unknown> = () => ({})) {}
+
   private get cfg() {
     return vscode.workspace.getConfiguration('betterSqlTools');
   }
 
-  maxRows() { return clamp(this.cfg.get('results.maxRows'), 1000, 1, 1_000_000); }
-  connectTimeoutMs() { return clamp(this.cfg.get('connection.timeoutMs'), 30_000, 0, 600_000); }
-  historyLimit() { return clamp(this.cfg.get('history.maxEntries'), 200, 0, 5000); }
-  defaultDialect() { return this.cfg.get<string>('lint.defaultDialect') || 'ansi'; }
+  /** `key` is the setting without the "betterSqlTools." prefix. */
+  private get<T>(key: string, fallback?: T): T | undefined {
+    const o = this.overlay();
+    if (Object.prototype.hasOwnProperty.call(o, key)) return o[key] as T;
+    return fallback === undefined ? this.cfg.get<T>(key) : this.cfg.get<T>(key, fallback);
+  }
 
-  completionEnabled() { return this.cfg.get<boolean>('completion.enabled', true); }
-  codeLensEnabled() { return this.cfg.get<boolean>('codeLens.enabled', true); }
+  maxRows() { return clamp(this.get('results.maxRows'), 1000, 1, 1_000_000); }
+  connectTimeoutMs() { return clamp(this.get('connection.timeoutMs'), 30_000, 0, 600_000); }
+  historyLimit() { return clamp(this.get('history.maxEntries'), 200, 0, 5000); }
+  defaultDialect() { return this.get<string>('lint.defaultDialect') || 'ansi'; }
+
+  completionEnabled() { return this.get<boolean>('completion.enabled', true) !== false; }
+  codeLensEnabled() { return this.get<boolean>('codeLens.enabled', true) !== false; }
   /** Linting runs an external program, so it waits for workspace trust. */
-  lintEnabled() { return vscode.workspace.isTrusted && this.cfg.get<boolean>('lint.enabled', true); }
-  lintMode(): LintMode { return this.cfg.get<LintMode>('lint.run', 'onSave'); }
+  lintEnabled() { return vscode.workspace.isTrusted && this.get<boolean>('lint.enabled', true) !== false; }
+  lintMode(): LintMode { return this.get<LintMode>('lint.run', 'onSave') as LintMode; }
 
   lintSeverity(): vscode.DiagnosticSeverity {
-    switch (this.cfg.get<string>('lint.severity', 'warning')) {
+    switch (this.get<string>('lint.severity', 'warning')) {
       case 'error': return vscode.DiagnosticSeverity.Error;
       case 'information': return vscode.DiagnosticSeverity.Information;
       case 'hint': return vscode.DiagnosticSeverity.Hint;
@@ -34,9 +46,10 @@ export class VsCodeSettings implements SettingsReader {
   }
 
   sqlfluff(): SqlfluffOptions {
+    const args = this.get<unknown>('lint.sqlfluffArgs', []);
     return {
-      command: this.cfg.get<string>('lint.sqlfluffPath') || 'sqlfluff',
-      args: this.cfg.get<string[]>('lint.sqlfluffArgs', []),
+      command: this.get<string>('lint.sqlfluffPath') || 'sqlfluff',
+      args: Array.isArray(args) ? args.filter((a): a is string => typeof a === 'string') : [],
       timeoutMs: 30_000,
     };
   }

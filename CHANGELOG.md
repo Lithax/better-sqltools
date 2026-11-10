@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+* **Drivers are plugins.** SQLite moved out of the core into its own extension (`drivers/sqlite`, `better-sqltools-sqlite`).
+  Driver extensions declare themselves in `package.json` (`betterSqlTools.drivers`), are listed with their own icon before
+  they load, are woken when a connection needs them, and are woken when installed at runtime.
+* Extension icons (generated PNG) for the core and the SQLite driver; the welcome view points to *Find Drivers* when no
+  driver is installed.
+* **Groups.** File connections under groups; create, rename and delete them from the view, drag connections in, or use
+  *Move to Group*.
+* **Project configuration** in `.better-sqltools.toml` / `.better-sqltools/*.toml`: connections, groups and any
+  setting, with problems reported in the Problems panel. See `docs/CONFIGURATION.md`.
+* Inline passwords may use `${env:NAME}` and the other variables; an unset variable prompts instead of becoming an empty password.
+
 ## 0.1.0
 
 First build.

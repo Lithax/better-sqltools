@@ -84,6 +84,7 @@ export interface MockState {
   commands: Map<string, Fn>;
   executed: [string, unknown[]][];
   treeProviders: Record<string, any>;
+  treeViewOptions: Record<string, any>;
   webviewViewProviders: Record<string, any>;
   resultsMessages: any[];
   resultsHandler?: Fn;
@@ -135,6 +136,8 @@ export class MockEditor {
     const p = document.positionAt(cursorOffset);
     this.selection = { active: p, isEmpty: true, start: p, end: p };
   }
+  revealed?: Range;
+  revealRange(r: Range) { this.revealed = r; }
   async edit(cb: (b: { replace(r: Range, t: string): void }) => void) {
     const doc = this.document;
     cb({ replace: (r, t) => { doc.text = doc.text.slice(0, doc.offsetAt(r.start)) + t + doc.text.slice(doc.offsetAt(r.end)); doc.version++; } });
@@ -144,14 +147,14 @@ export class MockEditor {
 
 export function installVscodeMock(folder: string) {
   const state: MockState = {
-    commands: new Map(), executed: [], treeProviders: {}, webviewViewProviders: {}, resultsMessages: [], panels: [],
+    commands: new Map(), executed: [], treeProviders: {}, treeViewOptions: {}, webviewViewProviders: {}, resultsMessages: [], panels: [],
     providers: {}, diagnostics: new Map(), statusBar: {}, messages: [], quickPickAnswers: [], inputAnswers: [],
     messageAnswers: [], openDialogAnswers: [], saveDialogAnswers: [], config: { user: {}, workspace: {} },
     clipboard: '', documents: [], secrets: new Map(), folder, logs: [], extensions: [],
   };
   const ev = {
     config: new Emitter<any>(), open: new Emitter<any>(), save: new Emitter<any>(), change: new Emitter<any>(),
-    close: new Emitter<any>(), trust: new Emitter<void>(), activeEditor: new Emitter<any>(), extChange: new Emitter<void>(),
+    close: new Emitter<any>(), trust: new Emitter<void>(), activeEditor: new Emitter<any>(), extChange: new Emitter<void>(), fsChange: new Emitter<void>(),
   };
   let untitled = 0;
   const message = (kind: string) => async (msg: string, ...rest: any[]) => {
@@ -173,6 +176,11 @@ export function installVscodeMock(folder: string) {
     Disposable: class { constructor(private f: Fn) {} dispose() { this.f(); } },
     ThemeIcon: class { constructor(readonly id: string, readonly color?: unknown) {} },
     ThemeColor: class { constructor(readonly id: string) {} },
+    FileType: { File: 1, Directory: 2, SymbolicLink: 64 },
+    RelativePattern: class { constructor(readonly base: any, readonly pattern: string) {} },
+    DataTransferItem: class { constructor(readonly value: unknown) {} async asString() { return JSON.stringify(this.value); } },
+    Selection: class { constructor(readonly anchor: Position, readonly active: Position) {} },
+    TextEditorRevealType: { Default: 0, InCenter: 1, InCenterIfOutsideViewport: 2, AtTop: 3 },
     TreeItem: class { id?: string; description?: string; tooltip?: unknown; contextValue?: string; iconPath?: unknown; command?: unknown; constructor(public label: string, public collapsibleState: number = 0) {} },
     MarkdownString: class { value = ''; constructor(v = '', readonly supportThemeIcons = false) { this.value = v; } appendMarkdown(s: string) { this.value += s; return this; } appendCodeblock(c: string) { this.value += c; return this; } },
     CodeLens: class { constructor(readonly range: Range, readonly command?: any) {} },
@@ -218,7 +226,7 @@ export function installVscodeMock(folder: string) {
 
     window: {
       createOutputChannel: () => ({ debug: (m: string) => state.logs.push(m), info: (m: string) => state.logs.push(m), warn: (m: string) => state.logs.push(m), error: (m: string) => state.logs.push(m), show() {}, dispose() {} }),
-      createTreeView: (id: string, o: any) => { state.treeProviders[id] = o.treeDataProvider; return { dispose() {} }; },
+      createTreeView: (id: string, o: any) => { state.treeProviders[id] = o.treeDataProvider; state.treeViewOptions[id] = o; return { dispose() {} }; },
       registerTreeDataProvider: (id: string, p: any) => { state.treeProviders[id] = p; return { dispose() {} }; },
       registerWebviewViewProvider: (id: string, p: any) => { state.webviewViewProviders[id] = p; return { dispose() {} }; },
       createStatusBarItem: () => ({
@@ -252,7 +260,16 @@ export function installVscodeMock(folder: string) {
         ev.open.fire(doc);
         return doc;
       },
-      fs: { writeFile: async (u: Uri, bytes: Uint8Array) => fs.writeFileSync(u.fsPath, bytes) },
+      fs: {
+        writeFile: async (u: Uri, bytes: Uint8Array) => fs.writeFileSync(u.fsPath, bytes),
+        readFile: async (u: Uri) => new Uint8Array(fs.readFileSync(u.fsPath)),
+        stat: async (u: Uri) => { const s = fs.statSync(u.fsPath); return { type: s.isDirectory() ? 2 : 1, size: s.size }; },
+        createDirectory: async (u: Uri) => void fs.mkdirSync(u.fsPath, { recursive: true }),
+        readDirectory: async (u: Uri) => fs.readdirSync(u.fsPath, { withFileTypes: true }).map((d) => [d.name, d.isDirectory() ? 2 : 1] as [string, number]),
+      },
+      createFileSystemWatcher: () => ({
+        onDidCreate: ev.fsChange.event, onDidChange: ev.fsChange.event, onDidDelete: ev.fsChange.event, dispose() {},
+      }),
       onDidChangeConfiguration: ev.config.event,
       onDidOpenTextDocument: ev.open.event,
       onDidSaveTextDocument: ev.save.event,
@@ -301,6 +318,7 @@ export function installVscodeMock(folder: string) {
   };
 
   const context = {
+    extension: { packageJSON: require('../package.json') },
     subscriptions: [] as { dispose(): any }[],
     extensionUri: Uri.file(path.join(__dirname, '..')),
     globalState: new Memento(),

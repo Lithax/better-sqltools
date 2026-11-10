@@ -103,6 +103,42 @@
         "icon": "$(add)"
       },
       {
+        "command": "betterSqlTools.newGroup",
+        "title": "New Group…",
+        "category": "Better SQLTools",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "betterSqlTools.renameGroup",
+        "title": "Rename Group…",
+        "category": "Better SQLTools"
+      },
+      {
+        "command": "betterSqlTools.deleteGroup",
+        "title": "Delete Group",
+        "category": "Better SQLTools"
+      },
+      {
+        "command": "betterSqlTools.moveToGroup",
+        "title": "Move to Group…",
+        "category": "Better SQLTools"
+      },
+      {
+        "command": "betterSqlTools.openProjectConfig",
+        "title": "Open Project Config File",
+        "category": "Better SQLTools"
+      },
+      {
+        "command": "betterSqlTools.createProjectConfig",
+        "title": "Create Project Config File (.better-sqltools.toml)",
+        "category": "Better SQLTools"
+      },
+      {
+        "command": "betterSqlTools.reloadProjectConfig",
+        "title": "Reload Project Config",
+        "category": "Better SQLTools"
+      },
+      {
         "command": "betterSqlTools.editConnection",
         "title": "Edit Connection",
         "category": "Better SQLTools",
@@ -225,6 +261,18 @@
           "when": "false"
         },
         {
+          "command": "betterSqlTools.renameGroup",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.deleteGroup",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.moveToGroup",
+          "when": "false"
+        },
+        {
           "command": "betterSqlTools.showTableData",
           "when": "false"
         },
@@ -268,14 +316,34 @@
           "group": "navigation@1"
         },
         {
-          "command": "betterSqlTools.refresh",
+          "command": "betterSqlTools.newGroup",
           "when": "view == betterSqlTools.connections",
           "group": "navigation@2"
         },
         {
-          "command": "betterSqlTools.showHistory",
+          "command": "betterSqlTools.refresh",
           "when": "view == betterSqlTools.connections",
           "group": "navigation@3"
+        },
+        {
+          "command": "betterSqlTools.showHistory",
+          "when": "view == betterSqlTools.connections",
+          "group": "navigation@4"
+        },
+        {
+          "command": "betterSqlTools.openProjectConfig",
+          "when": "view == betterSqlTools.connections",
+          "group": "9_project@1"
+        },
+        {
+          "command": "betterSqlTools.createProjectConfig",
+          "when": "view == betterSqlTools.connections",
+          "group": "9_project@2"
+        },
+        {
+          "command": "betterSqlTools.reloadProjectConfig",
+          "when": "view == betterSqlTools.connections",
+          "group": "9_project@3"
         },
         {
           "command": "betterSqlTools.findDrivers",
@@ -338,6 +406,26 @@
           "command": "betterSqlTools.deleteConnection",
           "when": "view == betterSqlTools.connections && viewItem =~ /^connection\\./",
           "group": "2_manage@3"
+        },
+        {
+          "command": "betterSqlTools.moveToGroup",
+          "when": "view == betterSqlTools.connections && viewItem =~ /^connection\\./",
+          "group": "2_manage@4"
+        },
+        {
+          "command": "betterSqlTools.renameGroup",
+          "when": "view == betterSqlTools.connections && viewItem =~ /^group\\.(user|workspace|implicit)$/",
+          "group": "1_group@1"
+        },
+        {
+          "command": "betterSqlTools.deleteGroup",
+          "when": "view == betterSqlTools.connections && viewItem =~ /^group\\.(user|workspace|implicit)$/",
+          "group": "1_group@2"
+        },
+        {
+          "command": "betterSqlTools.openProjectConfig",
+          "when": "view == betterSqlTools.connections && viewItem == group.project",
+          "group": "1_group@3"
         },
         {
           "command": "betterSqlTools.showTableData",
@@ -427,10 +515,48 @@
                 "type": "string",
                 "description": "Driver id, for example \"sqlite\"."
               },
+              "group": {
+                "type": "string",
+                "description": "The group (project) the connection is listed under, by id. See betterSqlTools.groups."
+              },
               "options": {
                 "type": "object",
                 "additionalProperties": true,
                 "markdownDescription": "Driver options. `${workspaceFolder}`, `${userHome}` and `${env:NAME}` are expanded."
+              }
+            }
+          }
+        },
+        "betterSqlTools.groups": {
+          "type": "array",
+          "default": [],
+          "scope": "window",
+          "markdownDescription": "Groups (projects) that connections are filed under, like `personal` or `arom-backend`. Use *New Group* in the view rather than editing by hand. A project can also define groups, connections and settings in `.better-sqltools.toml`.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "What a connection's `group` refers to."
+              },
+              "name": {
+                "type": "string",
+                "description": "Name shown in the Connections view. Defaults to the id."
+              },
+              "description": {
+                "type": "string"
+              },
+              "icon": {
+                "type": "string",
+                "description": "A codicon id, for example \"server\"."
+              },
+              "color": {
+                "type": "string",
+                "description": "A theme colour id, for example \"charts.blue\"."
               }
             }
           }
@@ -538,6 +664,7 @@
     "@vscode/vsce": "^4.1.0",
     "esbuild": "^0.28.2",
     "jsdom": "^31.0.0",
+    "smol-toml": "^1.9.1",
     "sql.js": "^1.15.2",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3"

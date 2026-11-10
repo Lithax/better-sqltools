@@ -1,5 +1,6 @@
 export type ConnectionId = string;
-export type ProfileScope = 'user' | 'workspace';
+/** Where a connection is stored: user or workspace settings, or a project config file (read-only). */
+export type ProfileScope = 'user' | 'workspace' | 'project';
 
 /** A saved connection. Secrets are never part of it; they live in a SecretStore. */
 export interface ConnectionProfile {
@@ -10,6 +11,10 @@ export interface ConnectionProfile {
   /** Non-secret options, shaped by the driver's connectionSchema. */
   options: Record<string, unknown>;
   scope?: ProfileScope;
+  /** The group (project) it is listed under, by id. */
+  group?: string;
+  /** The config file it comes from (a URI string); only for scope "project". */
+  file?: string;
 }
 
 // ---- query results -------------------------------------------------------
@@ -131,4 +136,15 @@ export interface LintIssue {
   rule?: string;
   severity: LintSeverity;
   fixable: boolean;
+}
+
+/** A named folder for connections: "personal", "global", "arom-backend". */
+export interface ConnectionGroup {
+  id: string;
+  name: string;
+  description?: string;
+  /** A codicon id, e.g. "server". */
+  icon?: string;
+  /** A theme colour id, e.g. "charts.blue". */
+  color?: string;
 }

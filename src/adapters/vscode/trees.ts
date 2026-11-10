@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
-import { errorMessage } from '../../domain/errors';
+import { errorMessage, ProjectManagedError } from '../../domain/errors';
 import type { DriverEntry } from '../../application/driver-directory';
 import type { ConnectionId, SchemaNode } from '../../domain/model';
 import type { App } from './app';
 import { treeIcon } from './driver-icons';
 
 export type TreeNode =
+  | { type: 'group'; id: string }
   | { type: 'connection'; id: ConnectionId }
   | { type: 'node'; connectionId: ConnectionId; node: SchemaNode };
 
@@ -29,20 +30,25 @@ const connectCommand = (id: ConnectionId): vscode.Command => ({
   arguments: [{ type: 'connection', id } satisfies TreeNode],
 });
 
+type TreeDeps = Pick<App, 'connections' | 'schema' | 'registry' | 'drivers' | 'groups' | 'logger'>;
+
 /**
- * Connections and their schema objects. A connection only has children while connected; clicking a
- * disconnected one connects it. The item id carries the state, so a freshly connected item opens expanded.
+ * Groups, their connections and the connections' schema objects. A connection only has children while
+ * connected; clicking a disconnected one connects it. The item id carries the state, so a freshly connected
+ * item opens expanded. Without any group the connections are listed flat.
  */
 export class ConnectionsTree implements vscode.TreeDataProvider<TreeNode>, vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<TreeNode | undefined>();
   readonly onDidChangeTreeData = this.emitter.event;
   private readonly subs: { dispose(): void }[];
 
-  constructor(private readonly app: Pick<App, 'connections' | 'schema' | 'registry' | 'logger'>) {
+  constructor(private readonly app: TreeDeps) {
     this.subs = [
       this.emitter,
       app.connections.onDidChange(() => this.refresh()),
       app.registry.onDidChange(() => this.refresh()),
+      app.drivers.onDidChange(() => this.refresh()),
+      app.groups.onDidChange(() => this.refresh()),
       // DDL run from an editor, or a manual refresh, must show up in the tree without further ado
       app.schema.onDidInvalidate(() => this.refresh()),
     ];
@@ -54,11 +60,22 @@ export class ConnectionsTree implements vscode.TreeDataProvider<TreeNode>, vscod
   refresh(node?: TreeNode) { this.emitter.fire(node); }
 
   getTreeItem(el: TreeNode): vscode.TreeItem {
-    return el.type === 'connection' ? this.connectionItem(el.id) : this.nodeItem(el);
+    switch (el.type) {
+      case 'group': return this.groupItem(el.id);
+      case 'connection': return this.connectionItem(el.id);
+      default: return this.nodeItem(el);
+    }
+  }
+
+  getParent(el: TreeNode): TreeNode | undefined {
+    if (el.type !== 'connection') return undefined;
+    const group = this.app.connections.info(el.id)?.profile.group;
+    return group ? { type: 'group', id: group } : undefined;
   }
 
   async getChildren(el?: TreeNode): Promise<TreeNode[]> {
-    if (!el) return this.app.connections.list().map((i) => ({ type: 'connection', id: i.profile.id }));
+    if (!el) return this.roots();
+    if (el.type === 'group') return this.members(el.id);
     const connectionId = el.type === 'connection' ? el.id : el.connectionId;
     try {
       const nodes = await this.app.schema.children(connectionId, el.type === 'node' ? el.node : undefined);
@@ -68,6 +85,36 @@ export class ConnectionsTree implements vscode.TreeDataProvider<TreeNode>, vscod
       void vscode.window.showErrorMessage(`Could not load schema objects: ${errorMessage(e)}`);
       return [];
     }
+  }
+
+  private roots(): TreeNode[] {
+    const groups = this.app.groups.list();
+    const loose = this.app.connections.list().filter((i) => !i.profile.group);
+    return [
+      ...groups.map((g): TreeNode => ({ type: 'group', id: g.id })),
+      ...loose.map((i): TreeNode => ({ type: 'connection', id: i.profile.id })),
+    ];
+  }
+
+  private members(groupId: string): TreeNode[] {
+    return this.app.connections.list().filter((i) => i.profile.group === groupId).map((i) => ({ type: 'connection', id: i.profile.id }));
+  }
+
+  private groupItem(id: string): vscode.TreeItem {
+    const g = this.app.groups.get(id);
+    const members = this.app.connections.list().filter((i) => i.profile.group === id);
+    const live = members.filter((m) => m.state === 'connected').length;
+    const item = new vscode.TreeItem(g?.name ?? id, vscode.TreeItemCollapsibleState.Expanded);
+    item.id = `group/${id}`;
+    item.contextValue = `group.${g?.scope ?? 'implicit'}`;
+    item.description = [`${members.length}`, live ? `${live} connected` : '', g?.scope === 'project' ? 'project' : ''].filter(Boolean).join(' · ');
+    item.iconPath = new vscode.ThemeIcon(g?.icon ?? 'folder', g?.color ? new vscode.ThemeColor(g.color) : undefined);
+    const tip = new vscode.MarkdownString(undefined, true);
+    tip.appendMarkdown(`**${(g?.name ?? id).replace(/[*_`\\]/g, '\\$&')}**`);
+    if (g?.description) tip.appendMarkdown(`\n\n${g.description}`);
+    if (g?.scope === 'project' && g.file) tip.appendMarkdown(`\n\nDefined in \`${decodeURIComponent(g.file.split('/').pop() ?? g.file)}\``);
+    item.tooltip = tip;
+    return item;
   }
 
   private nodeItem(el: Extract<TreeNode, { type: 'node' }>): vscode.TreeItem {
@@ -89,18 +136,32 @@ export class ConnectionsTree implements vscode.TreeDataProvider<TreeNode>, vscod
     const item = new vscode.TreeItem(info?.profile.name ?? id, vscode.TreeItemCollapsibleState.None);
     if (!info) return item;
 
-    const driverName = info.descriptor?.displayName ?? info.profile.driver;
+    const driver = this.app.drivers.get(info.profile.driver);
+    const driverName = info.descriptor?.displayName ?? driver?.displayName ?? info.profile.driver;
     const tip = new vscode.MarkdownString(undefined, true);
     tip.appendMarkdown(`**${info.profile.name.replace(/[*_`\\]/g, '\\$&')}**\n\n${driverName}`);
+    if (info.profile.scope === 'project' && info.profile.file) {
+      tip.appendMarkdown(`\n\nDefined in \`${decodeURIComponent(info.profile.file.split('/').pop() ?? info.profile.file)}\``);
+    }
     item.tooltip = tip;
 
     if (!info.descriptor) {
-      item.id = `connection/${id}/nodriver`;
-      item.contextValue = 'connection.nodriver';
-      item.description = `${driverName} · driver not installed`;
-      item.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('list.warningForeground'));
-      tip.appendMarkdown('\n\nThis driver is not installed. Click to look for it in the Marketplace.');
-      item.command = { command: 'betterSqlTools.findDrivers', title: 'Find drivers' };
+      // the driver is not registered: still loading, failed, or not installed at all
+      const base = `connection/${id}/nodriver`;
+      if (driver?.state === 'inactive') {
+        item.id = `${base}/loading`;
+        item.contextValue = 'connection.nodriver';
+        item.description = `${driverName} · loading driver…`;
+        item.iconPath = new vscode.ThemeIcon('loading~spin');
+      } else {
+        item.id = `${base}/${driver?.state ?? 'missing'}`;
+        item.contextValue = 'connection.nodriver';
+        item.description = `${driverName} · ${driver?.state === 'failed' ? 'driver failed to load' : 'driver not installed'}`;
+        item.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('list.warningForeground'));
+        if (driver?.error) tip.appendCodeblock(driver.error, 'text');
+        tip.appendMarkdown(driver?.state === 'failed' ? '\n\nThe driver\'s extension failed to activate. See the Output panel.' : '\n\nThis driver is not installed. Click to look for it in the Marketplace.');
+        item.command = { command: 'betterSqlTools.findDrivers', title: 'Find drivers' };
+      }
       return item;
     }
 
@@ -126,6 +187,37 @@ export class ConnectionsTree implements vscode.TreeDataProvider<TreeNode>, vscod
         item.command = connectCommand(id);
     }
     return item;
+  }
+}
+
+export const CONNECTION_DRAG_MIME = 'application/vnd.code.tree.bettersqltools.connections';
+
+/** Drag connections onto a group to file them there, onto a connection to join its group, or onto empty space to ungroup them. */
+export class ConnectionsDragAndDrop implements vscode.TreeDragAndDropController<TreeNode> {
+  readonly dragMimeTypes = [CONNECTION_DRAG_MIME];
+  readonly dropMimeTypes = [CONNECTION_DRAG_MIME];
+
+  constructor(private readonly app: Pick<App, 'groups' | 'connections' | 'logger'>) {}
+
+  handleDrag(source: readonly TreeNode[], data: vscode.DataTransfer): void {
+    const ids = source.flatMap((n) => (n.type === 'connection' ? [n.id] : []));
+    if (ids.length) data.set(CONNECTION_DRAG_MIME, new vscode.DataTransferItem(ids));
+  }
+
+  async handleDrop(target: TreeNode | undefined, data: vscode.DataTransfer): Promise<void> {
+    const ids = data.get(CONNECTION_DRAG_MIME)?.value as ConnectionId[] | undefined;
+    if (!ids?.length || target?.type === 'node') return;
+    const group = target?.type === 'group' ? target.id : target ? this.app.connections.info(target.id)?.profile.group : undefined;
+    const blocked: string[] = [];
+    for (const id of ids) {
+      try {
+        await this.app.groups.assign(id, group);
+      } catch (e) {
+        if (!(e instanceof ProjectManagedError)) throw e;
+        blocked.push(e.message);
+      }
+    }
+    if (blocked.length) void vscode.window.showInformationMessage(blocked[0] + (blocked.length > 1 ? ` (${blocked.length - 1} more were not moved.)` : ''));
   }
 }
 

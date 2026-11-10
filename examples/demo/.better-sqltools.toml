@@ -1,0 +1,21 @@
+# Project configuration for the demo workspace (see docs/CONFIGURATION.md).
+# The group below, its connection and the setting come from this file; "Demo library" lives in .vscode/settings.json.
+
+[project]
+name = "Demo project"
+group = "demo"
+
+[groups.demo]
+icon = "library"
+description = "Defined in .better-sqltools.toml, next to demo.db"
+
+[[connections]]
+name = "Library (read-only)"
+driver = "sqlite"
+[connections.options]
+path = "${workspaceFolder}/demo.db"
+readOnly = true
+createIfMissing = false
+
+[settings]
+"results.maxRows" = 500

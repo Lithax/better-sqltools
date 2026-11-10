@@ -39,3 +39,10 @@ export function errorMessage(e: unknown): string {
     return String(e);
   }
 }
+
+/** Something that is defined in a project config file cannot be changed from the UI. */
+export class ProjectManagedError extends BetterSqlToolsError {
+  constructor(readonly what: string, readonly file?: string) {
+    super(`${what} is defined in ${file ? decodeURIComponent(file.split('/').pop() ?? file) : 'a project config file'}. Edit that file to change it.`, 'PROJECT_MANAGED');
+  }
+}

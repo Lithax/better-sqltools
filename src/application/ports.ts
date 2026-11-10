@@ -5,6 +5,7 @@
  *                              built in or contributed by other VS Code extensions.
  *   everything else          - implemented by the host adapter (VS Code) or by tests.
  */
+import type { ConnectionGroup } from '../domain/model';
 import type { ConnectionField, DriverDescriptor, DriverIcon } from '../domain/driver-descriptor';
 import type {
   Catalog, Column, ConnectionId, ConnectionProfile, HistoryEntry, LintIssue, SchemaNode,
@@ -134,4 +135,39 @@ export interface Linter {
   fix(req: LintRequest): Promise<string>;
   /** Layout-only formatting; resolves to the formatted text. */
   format(req: LintRequest): Promise<string>;
+}
+
+// ---- project configuration ---------------------------------------------------
+
+/** One TOML file of a project (.better-sqltools.toml, or a file in .better-sqltools/). */
+export interface ProjectConfigFile {
+  /** Where it lives (a URI string). Issues point at it. */
+  id: string;
+  /** Files of one workspace folder share a key, which keeps their connection ids apart from other projects'. */
+  scopeKey: string;
+  /** For humans: ".better-sqltools.toml" or ".better-sqltools/dev.toml". */
+  label: string;
+  text: string;
+}
+
+/** Where project config files come from. Implemented by the host (VS Code) adapter. */
+export interface ProjectConfigSource {
+  /** Every config file of every workspace folder: folders in order; per folder the root file, then the directory's files by name. */
+  read(): Promise<ProjectConfigFile[]>;
+  readonly onDidChange: Event<void>;
+}
+
+/** Parses TOML text. Kept out of the core so the core has no dependencies. */
+export type ParseToml = (text: string) => { value?: unknown; error?: { message: string; line?: number } };
+
+/** Groups saved in user or workspace settings. Project files define their own. */
+export interface StoredGroup extends ConnectionGroup {
+  scope: 'user' | 'workspace';
+}
+
+export interface GroupRepository {
+  list(): StoredGroup[];
+  save(group: ConnectionGroup, scope: 'user' | 'workspace'): Promise<void>;
+  remove(id: string): Promise<void>;
+  readonly onDidChange: Event<void>;
 }

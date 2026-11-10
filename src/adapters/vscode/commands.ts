@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { CancelledError, DriverNotFoundError, errorMessage } from '../../domain/errors';
+import { CancelledError, DriverNotFoundError, errorMessage, ProjectManagedError } from '../../domain/errors';
 import type { ConnectionId, ConnectionProfile, HistoryEntry, SchemaNode } from '../../domain/model';
 import { selectSample } from '../../domain/sql/generate';
 import { splitStatements, statementAt } from '../../domain/sql/splitter';
@@ -8,6 +8,8 @@ import type { App } from './app';
 import { ConnectionForm } from './connection-form';
 import { cwdFor, fullRange } from './diagnostics';
 import { slug } from './profile-repository';
+import { CONFIG_FILE } from './project-files';
+import { PROJECT_TEMPLATE } from './project-template';
 import type { ConnectionsTree, TreeNode } from './trees';
 
 const oneLine = (s: string, n: number) => {
@@ -19,6 +21,12 @@ interface ConnectionPick extends vscode.QuickPickItem {
   id: ConnectionId;
 }
 
+interface GroupPick extends vscode.QuickPickItem {
+  /** The group id; `null` for "no group". */
+  value?: string | null;
+  create?: boolean;
+}
+
 export function registerCommands(app: App, tree: ConnectionsTree): vscode.Disposable[] {
   const { connections, schema, bindings } = app;
 
@@ -27,7 +35,9 @@ export function registerCommands(app: App, tree: ConnectionsTree): vscode.Dispos
   const report = (e: unknown) => {
     if (e instanceof CancelledError) return;
     app.logger.error(errorMessage(e));
-    if (e instanceof DriverNotFoundError) {
+    if (e instanceof ProjectManagedError) {
+      void vscode.window.showInformationMessage(e.message, 'Open Config File').then((p) => p && openConfigFile(e.file));
+    } else if (e instanceof DriverNotFoundError) {
       void vscode.window.showErrorMessage(e.message, 'Find Drivers').then((p) => p && vscode.commands.executeCommand('betterSqlTools.findDrivers'));
     } else {
       void vscode.window.showErrorMessage(errorMessage(e), 'Show Log').then((p) => p && app.logger.channel.show());
@@ -43,7 +53,28 @@ export function registerCommands(app: App, tree: ConnectionsTree): vscode.Dispos
       }
     });
 
-  const connectionOf = (el?: TreeNode): ConnectionId | undefined => (el ? (el.type === 'connection' ? el.id : el.connectionId) : undefined);
+  const connectionOf = (el?: TreeNode): ConnectionId | undefined =>
+    el && el.type !== 'group' ? (el.type === 'connection' ? el.id : el.connectionId) : undefined;
+
+  /** Opens a project config file, on the line that mentions `needle` when given. */
+  async function openConfigFile(file?: string, needle?: string) {
+    const uri = file ? vscode.Uri.parse(file) : app.project.current().files[0] ? vscode.Uri.parse(app.project.current().files[0]) : undefined;
+    if (!uri) {
+      const pick = await vscode.window.showInformationMessage('This workspace has no project config file yet.', 'Create One');
+      if (pick) await vscode.commands.executeCommand('betterSqlTools.createProjectConfig');
+      return;
+    }
+    const doc = await vscode.workspace.openTextDocument(uri);
+    const editor = await vscode.window.showTextDocument(doc, { preview: false });
+    if (needle) {
+      const line = doc.getText().split(/\r?\n/).findIndex((l) => l.includes(needle));
+      if (line >= 0) {
+        const at = new vscode.Position(line, 0);
+        editor.selection = new vscode.Selection(at, at);
+        editor.revealRange(new vscode.Range(at, at), vscode.TextEditorRevealType.InCenter);
+      }
+    }
+  }
 
   async function pickConnection(placeHolder: string, filter?: (state: string) => boolean): Promise<ConnectionId | undefined> {
     const infos = connections.list().filter((i) => !filter || filter(i.state));
@@ -131,6 +162,7 @@ export function registerCommands(app: App, tree: ConnectionsTree): vscode.Dispos
     cmd('editConnection', async (el: TreeNode) => {
       const profile = connections.info(connectionOf(el) ?? '')?.profile;
       if (!profile) return;
+      if (profile.scope === 'project') return openConfigFile(profile.file, profile.name); // defined in a file, so edit the file
       if (!app.registry.get(profile.driver)) {
         const pick = await vscode.window.showWarningMessage(`The "${profile.driver}" driver is not installed, so the form cannot be shown.`, 'Find Drivers');
         if (pick) await vscode.commands.executeCommand('betterSqlTools.findDrivers');
@@ -146,7 +178,7 @@ export function registerCommands(app: App, tree: ConnectionsTree): vscode.Dispos
       const name = `${src.name} (copy)`;
       let id = slug(name);
       while (taken.has(id)) id += '-2';
-      const copy: ConnectionProfile = { ...src, id, name, options: { ...src.options } };
+      const copy: ConnectionProfile = { ...src, id, name, options: { ...src.options }, scope: src.scope === 'project' ? 'user' : src.scope, file: undefined };
       await app.profiles.save(copy);
       void vscode.window.showInformationMessage(`Created "${name}". Passwords are not copied.`);
     }),
@@ -154,12 +186,78 @@ export function registerCommands(app: App, tree: ConnectionsTree): vscode.Dispos
     cmd('deleteConnection', async (el: TreeNode) => {
       const info = connections.info(connectionOf(el) ?? '');
       if (!info) return;
+      if (info.profile.scope === 'project') throw new ProjectManagedError(`Connection "${info.profile.name}"`, info.profile.file);
       const ok = await vscode.window.showWarningMessage(`Delete the connection "${info.profile.name}"?`, { modal: true, detail: 'Its saved password is removed too. The database itself is not touched.' }, 'Delete');
       if (!ok) return;
       await connections.disconnect(info.profile.id);
       await app.profiles.remove(info.profile.id);
       await app.secrets.deleteAll(info.profile.id);
     }),
+
+    // ---- groups and project config ----------------------------------------------
+
+    cmd('newGroup', async () => {
+      const name = await vscode.window.showInputBox({
+        title: 'New group',
+        prompt: 'A name for the group, e.g. "personal" or "arom-backend". Connections can be dragged into it.',
+        validateInput: (v) => (v.trim() ? undefined : 'Give the group a name.'),
+      });
+      if (name?.trim()) await app.groups.ensure(name);
+    }),
+
+    cmd('renameGroup', async (el?: TreeNode) => {
+      const g = el?.type === 'group' ? app.groups.get(el.id) : undefined;
+      if (!g) return;
+      const name = await vscode.window.showInputBox({ title: `Rename "${g.name}"`, value: g.name, validateInput: (v) => (v.trim() ? undefined : 'Give the group a name.') });
+      if (name?.trim() && name.trim() !== g.name) await app.groups.rename(g.id, name);
+    }),
+
+    cmd('deleteGroup', async (el?: TreeNode) => {
+      const g = el?.type === 'group' ? app.groups.get(el.id) : undefined;
+      if (!g) return;
+      const n = connections.list().filter((i) => i.profile.group === g.id).length;
+      const ok = await vscode.window.showWarningMessage(`Delete the group "${g.name}"?`, { modal: true, detail: n ? `Its ${n} connection${n === 1 ? '' : 's'} stay and move out of the group.` : undefined }, 'Delete');
+      if (ok) await app.groups.remove(g.id);
+    }),
+
+    cmd('moveToGroup', async (el?: TreeNode, selected?: TreeNode[]) => {
+      const ids = [...new Set((selected?.length ? selected : [el]).flatMap((n) => (n?.type === 'connection' ? [n.id] : [])))];
+      if (!ids.length) return;
+      const current = new Set(ids.map((id) => connections.info(id)?.profile.group));
+      const items: GroupPick[] = [
+        { label: '$(close) No group', description: current.has(undefined) ? 'current' : undefined, value: null },
+        ...app.groups.list().map((g): GroupPick => ({ label: `$(${g.icon ?? 'folder'}) ${g.name}`, description: current.has(g.id) ? 'current' : g.scope === 'project' ? 'project' : undefined, detail: g.description, value: g.id })),
+        { label: '$(add) New group…', create: true },
+      ];
+      const pick = await vscode.window.showQuickPick(items, { placeHolder: ids.length > 1 ? `Move ${ids.length} connections to…` : 'Move to group…' });
+      if (!pick) return;
+      let target: string | undefined;
+      if (pick.create) {
+        const name = await vscode.window.showInputBox({ title: 'New group', prompt: 'A name for the group', validateInput: (v) => (v.trim() ? undefined : 'Give the group a name.') });
+        if (!name?.trim()) return;
+        target = await app.groups.ensure(name);
+      } else {
+        target = pick.value ?? undefined;
+      }
+      for (const id of ids) await app.groups.assign(id, target);
+    }),
+
+    cmd('openProjectConfig', (arg?: TreeNode | string) => {
+      if (typeof arg === 'string') return openConfigFile(arg);
+      if (arg?.type === 'group') return openConfigFile(app.groups.get(arg.id)?.file);
+      return openConfigFile();
+    }),
+
+    cmd('createProjectConfig', async () => {
+      const folder = vscode.workspace.workspaceFolders?.[0];
+      if (!folder) return void vscode.window.showInformationMessage('Open a folder first: project config lives next to your code.');
+      const uri = vscode.Uri.joinPath(folder.uri, CONFIG_FILE);
+      const exists = await Promise.resolve(vscode.workspace.fs.stat(uri)).then(() => true, () => false);
+      if (!exists) await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(PROJECT_TEMPLATE));
+      await openConfigFile(uri.toString());
+    }),
+
+    cmd('reloadProjectConfig', () => app.project.reload()),
 
     cmd('connect', async (el?: TreeNode) => {
       const id = connectionOf(el) ?? (await pickConnection('Connect to…', (s) => s !== 'connected'));

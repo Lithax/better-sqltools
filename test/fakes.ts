@@ -106,7 +106,7 @@ export function harness(opts: { prompt?: string | undefined } = {}) {
   };
   const connections = new ConnectionManager({
     registry, profiles, secrets, prompter, settings, logger: silentLogger, env: testEnv(),
-    resolveVariables: (s) => s.replace('${home}', '/home/test'),
+    resolveVariables: (s) => s.replace('${home}', '/home/test').replace('${unset}', ''),
   });
   const schema = new SchemaService(connections, silentLogger);
   const queries = new QueryService({ connections, schema, history, settings, logger: silentLogger });
