@@ -7,6 +7,8 @@
   let init = null;
   let busy = null; // 'test' | 'save' | null
   let notice = null; // { kind: 'ok' | 'error', text }
+  let unavailable = []; // installed drivers that cannot be used right now
+  let picker = null; // the driver picker while it is open
   const draft = { name: '', driver: '', scope: 'user', options: {}, secrets: {}, saveSecrets: true };
 
   function h(tag, attrs) {
@@ -36,10 +38,18 @@
     switch (m.type) {
       case 'init':
         init = m;
+        unavailable = m.unavailable || [];
         draft.name = m.profile.name;
         draft.driver = m.profile.driver;
         draft.scope = m.profile.scope;
         draft.options = Object.assign({}, m.profile.options);
+        render();
+        break;
+      case 'drivers': // one was installed or removed while the form is open
+        if (!init) break;
+        init.drivers = m.drivers;
+        unavailable = m.unavailable || [];
+        if (picker) picker.update();
         render();
         break;
       case 'testResult':
@@ -158,13 +168,19 @@
       h('h1', null, editing() ? 'Edit connection' : 'New connection'),
       h('p', { class: 'lead' }, editing() ? 'Changes are saved to your settings. Passwords stay in VS Code\u2019s secret storage.' : 'Pick a driver, fill in the details and test the connection before saving.'));
 
-    const driverSelect = h('select', {
-      id: 'driver', disabled: editing(),
-      onchange: (e) => { draft.driver = e.target.value; draft.options = {}; draft.secrets = {}; notice = null; render(); },
-    }, ...init.drivers.map((x) => h('option', { value: x.id }, x.displayName)));
-    driverSelect.value = draft.driver;
-    form.append(h('div', { class: 'field' }, h('label', { for: 'driver' }, 'Driver'), driverSelect,
-      d && d.description ? h('div', { class: 'hint' }, d.description) : null));
+    const current = d || null;
+    const driverBox = h('div', { class: 'input-with-icon' },
+      current ? driverIcon(current, 16) : null,
+      h('input', {
+        type: 'text', id: 'driver', readonly: true, class: editing() ? 'locked' : null, 'aria-describedby': 'driver-hint',
+        value: current ? current.displayName : '', placeholder: 'No driver selected',
+      }));
+    form.append(h('div', { class: 'field' },
+      h('label', { for: 'driver' }, 'Driver'),
+      h('div', { class: 'row' }, driverBox,
+        h('button', { type: 'button', id: 'choose-driver', disabled: editing(), onclick: openPicker }, 'Choose\u2026')),
+      h('div', { class: 'hint', id: 'driver-hint' },
+        editing() ? 'A connection keeps its driver. Create a new connection to use another one.' : current ? current.description : 'Choose the database driver this connection uses.')));
 
     form.append(h('div', { class: 'field' },
       h('label', { for: 'name' }, 'Name', h('span', { class: 'req', 'aria-hidden': 'true' }, ' *')),
@@ -200,5 +216,144 @@
       h('button', { type: 'button', class: 'ghost', onclick: () => vscode.postMessage({ type: 'cancel' }) }, 'Cancel')));
 
     root.append(form);
+  }
+
+  // ---- driver picker --------------------------------------------------------------------------
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+
+  /** A plain database glyph for drivers that ship no image icon. */
+  function glyph(size) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('width', String(size));
+    svg.setAttribute('height', String(size));
+    svg.setAttribute('class', 'dicon glyph');
+    svg.setAttribute('aria-hidden', 'true');
+    for (const d of ['M8 1.5c-2.9 0-5 .9-5 2s2.1 2 5 2 5-.9 5-2-2.1-2-5-2z', 'M3 3.5v9c0 1.1 2.1 2 5 2s5-.9 5-2v-9', 'M3 8c0 1.1 2.1 2 5 2s5-.9 5-2']) {
+      const p = document.createElementNS(SVG_NS, 'path');
+      p.setAttribute('d', d);
+      p.setAttribute('fill', 'none');
+      p.setAttribute('stroke', 'currentColor');
+      p.setAttribute('stroke-width', '1');
+      svg.append(p);
+    }
+    return svg;
+  }
+
+  /** The driver's own icon (one per theme kind if it ships two), else the glyph. */
+  function driverIcon(entry, size) {
+    const data = entry.iconData;
+    if (!data) return glyph(size);
+    const img = (src, cls) => h('img', { class: 'dicon ' + cls, src, alt: '', width: size, height: size });
+    return data.light === data.dark ? img(data.dark, '') : h('span', { class: 'dicon-pair' }, img(data.light, 'for-light'), img(data.dark, 'for-dark'));
+  }
+
+  function openPicker() {
+    if (picker || !init) return;
+    let query = '';
+    let selected = draft.driver;
+
+    const matches = (d) => {
+      const q = query.trim().toLowerCase();
+      return !q || [d.displayName, d.id, d.description || ''].some((s) => s.toLowerCase().indexOf(q) >= 0);
+    };
+    const choose = (id) => { selected = id; paint(); focusSelected(); };
+    const focusSelected = () => { const el = list.querySelector('.driver-card.selected'); if (el) el.focus(); };
+
+    const card = (d) => {
+      const on = d.id === selected;
+      return h('button', {
+        type: 'button', role: 'option', class: 'driver-card' + (on ? ' selected' : ''), 'aria-selected': on ? 'true' : 'false',
+        tabindex: on ? '0' : '-1', 'data-id': d.id, title: d.description || d.displayName,
+        onclick: () => choose(d.id),
+        ondblclick: () => { selected = d.id; confirm(); },
+      }, driverIcon(d, 32), h('span', { class: 'driver-name' }, d.displayName), h('span', { class: 'driver-id muted' }, d.id));
+    };
+    const missing = (d) =>
+      h('div', { class: 'driver-card unavailable', role: 'option', 'aria-disabled': 'true', title: d.error || d.description || d.displayName },
+        driverIcon(d, 32), h('span', { class: 'driver-name' }, d.displayName),
+        h('span', { class: 'driver-id muted' }, d.state === 'failed' ? 'Failed to load' : 'Not loaded'));
+
+    const search = h('input', { type: 'search', placeholder: 'Search drivers', 'aria-label': 'Search drivers', oninput: (e) => { query = e.target.value; paint(); } });
+    const list = h('div', { class: 'driver-grid', role: 'listbox', 'aria-label': 'Drivers' });
+    const count = h('div', { class: 'muted picker-count', role: 'status' });
+    const select = h('button', { type: 'button', class: 'primary', onclick: () => confirm() }, 'Select');
+    const overlay = h('div', { class: 'overlay', onmousedown: (e) => { if (e.target === overlay) close(); } });
+
+    function paint() {
+      const usable = init.drivers.filter(matches);
+      const others = unavailable.filter(matches);
+      list.replaceChildren(...usable.map(card), ...others.map(missing));
+      if (!list.querySelector('[tabindex="0"]')) { const first = list.querySelector('.driver-card[tabindex]'); if (first) first.setAttribute('tabindex', '0'); }
+      count.textContent = usable.length + others.length === 0
+        ? (query ? 'No driver matches \u201c' + query.trim() + '\u201d.' : 'No drivers are installed.')
+        : usable.length + (usable.length === 1 ? ' driver' : ' drivers') + (others.length ? ', ' + others.length + ' not available' : '');
+      select.disabled = !init.drivers.some((d) => d.id === selected);
+    }
+
+    function confirm() {
+      const d = init.drivers.find((x) => x.id === selected);
+      if (!d) return;
+      close();
+      if (d.id !== draft.driver) {
+        draft.driver = d.id;
+        draft.options = {};
+        draft.secrets = {};
+        notice = null;
+        render();
+      }
+    }
+
+    function close() {
+      overlay.remove();
+      picker = null;
+      const back = document.getElementById('choose-driver');
+      if (back) back.focus();
+    }
+
+    function move(delta) {
+      const cards = [...list.querySelectorAll('button.driver-card')];
+      if (!cards.length) return;
+      const at = cards.findIndex((c) => c.getAttribute('data-id') === selected);
+      const next = Math.max(0, Math.min(cards.length - 1, (at < 0 ? 0 : at) + delta));
+      choose(cards[next].getAttribute('data-id'));
+    }
+    const columns = () => {
+      const cards = [...list.querySelectorAll('button.driver-card')];
+      return Math.max(1, cards.filter((c) => c.offsetTop === (cards[0] ? cards[0].offsetTop : 0)).length);
+    };
+
+    function keys(e) {
+      if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+      if (e.key === 'Tab') { // keep focus inside the dialog
+        const items = [...dialog.querySelectorAll('input, button')].filter((x) => !x.disabled && x.getAttribute('tabindex') !== '-1');
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        return;
+      }
+      const onCard = e.target.classList && e.target.classList.contains('driver-card');
+      const onSearch = e.target === search;
+      if (e.key === 'Enter' && (onCard || onSearch) && !select.disabled) { e.preventDefault(); confirm(); return; }
+      if (!onCard && !(onSearch && e.key === 'ArrowDown')) return;
+      const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: columns(), ArrowUp: -columns() }[e.key];
+      if (step !== undefined) { e.preventDefault(); move(onSearch ? 0 : step); }
+    }
+
+    const dialog = h('div', { class: 'dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'picker-title', onkeydown: keys },
+      h('h2', { id: 'picker-title' }, 'Select a driver'),
+      search, list, count,
+      h('div', { class: 'dialog-actions' },
+        h('button', { type: 'button', onclick: () => vscode.postMessage({ type: 'findDrivers' }) }, 'Install more drivers\u2026'),
+        h('span', { class: 'spacer' }),
+        h('button', { type: 'button', onclick: () => close() }, 'Cancel'),
+        select));
+    overlay.append(dialog);
+    document.body.append(overlay);
+    picker = { update: paint };
+    paint();
+    search.focus();
   }
 }());

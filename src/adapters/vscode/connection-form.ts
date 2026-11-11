@@ -5,6 +5,7 @@ import { errorMessage } from '../../domain/errors';
 import type { ConnectionProfile, ProfileScope } from '../../domain/model';
 import { normalizeOptions } from '../../domain/validation';
 import type { App } from './app';
+import { iconData } from './driver-icons';
 import { slug } from './profile-repository';
 import { webviewHtml } from './webview-html';
 
@@ -32,7 +33,7 @@ export class ConnectionForm {
   }
 
   private readonly panel: vscode.WebviewPanel;
-
+  private readonly subs: vscode.Disposable[] = [];
   private constructor(
     private readonly app: App,
     private readonly profile: ConnectionProfile | undefined,
@@ -49,7 +50,12 @@ export class ConnectionForm {
     );
     this.panel.webview.onDidReceiveMessage((m) => this.onMessage(m)); // before the page can load and say `ready`
     this.panel.webview.html = webviewHtml(this.panel.webview, app.context.extensionUri, 'connection-form', 'Connection');
-    this.panel.onDidDispose(() => ConnectionForm.open.delete(key));
+    this.panel.onDidDispose(() => {
+      ConnectionForm.open.delete(key);
+      this.subs.forEach((s) => s.dispose());
+    });
+    // a driver installed while the form is open ("Install more drivers") shows up in the picker
+    this.subs.push(app.drivers.onDidChange(() => void this.sendDrivers()));
     ConnectionForm.open.set(key, this);
   }
 
@@ -64,6 +70,7 @@ export class ConnectionForm {
         case 'test': return await this.test(m.draft as Draft);
         case 'save': return await this.save(m.draft as Draft);
         case 'browse': return await this.browse(String(m.key));
+        case 'findDrivers': return void (await vscode.commands.executeCommand('betterSqlTools.findDrivers'));
         case 'cancel': return this.panel.dispose();
       }
     } catch (e) {
@@ -72,13 +79,32 @@ export class ConnectionForm {
     }
   }
 
+  /** Usable drivers (with their form schema) and the ones that are installed but not available, each with its icon. */
+  private async driverLists() {
+    const entries = this.app.drivers.list();
+    const ready = entries.filter((e) => e.state === 'ready' && e.descriptor);
+    const drivers = await Promise.all(ready.map(async (e) => ({ ...e.descriptor!, iconData: await iconData(e) })));
+    const unavailable = await Promise.all(
+      entries
+        .filter((e) => !ready.includes(e))
+        .map(async (e) => ({ id: e.id, displayName: e.displayName, description: e.description, state: e.state, error: e.error, iconData: await iconData(e) })),
+    );
+    return { drivers, unavailable };
+  }
+
+  private async sendDrivers() {
+    this.post({ type: 'drivers', ...(await this.driverLists()) });
+  }
+
   private async sendInit() {
     const p = this.profile;
-    const drivers = this.app.registry.list();
+    await this.app.drivers.activateAll(); // drivers are separate extensions that sleep until needed; the picker lists them all
+    const { drivers, unavailable } = await this.driverLists();
     this.post({
       type: 'init',
       mode: p ? 'edit' : 'new',
       drivers,
+      unavailable,
       profile: {
         name: p?.name ?? '',
         driver: p?.driver ?? this.driverId ?? drivers[0]?.id ?? '',

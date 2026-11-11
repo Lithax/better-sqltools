@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* **Driver picker** in the connection form: a text field with a *Choose…* button opens a searchable grid of drivers with
+  their icons, *Select* / *Cancel* and *Install more drivers…*. Drivers installed meanwhile appear live; unavailable ones
+  are listed with the reason.
+* Connection form: checkboxes and radios now match VS Code's own and line up with their labels (a CSS specificity clash
+  had collapsed the label layout); search fields use the theme's icon colour for the clear button.
 * **Drivers are plugins.** SQLite moved out of the core into its own extension (`drivers/sqlite`, `better-sqltools-sqlite`).
   Driver extensions declare themselves in `package.json` (`betterSqlTools.drivers`), are listed with their own icon before
   they load, are woken when a connection needs them, and are woken when installed at runtime.

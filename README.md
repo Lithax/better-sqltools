@@ -30,6 +30,10 @@ To install them for real: `npm run package` and `npm run package:sqlite`, then
   checkbox); the form, validation and *Test connection* come for free. Passwords go to VS Code's secret storage, never to
   settings. Connections are stored in `betterSqlTools.connections`, in user or workspace settings, so they sync and diff
   like any other setting. `${workspaceFolder}`, `${userHome}` and `${env:NAME}` are expanded.
+* **A driver picker.** The form's *Driver* field is a text field with a **Choose…** button. It opens a searchable grid of
+  drivers with their icons and names, with **Select**, **Cancel** and **Install more drivers…** (the Marketplace search
+  for driver extensions). A driver installed while the picker is open appears in it; drivers that failed to load are
+  listed, dimmed, with the reason.
 * **Run SQL.** `Ctrl/Cmd+Enter` runs the statement under the cursor (or the selection), `Ctrl/Cmd+Shift+Enter` the whole
   file. A *Run* CodeLens sits above every statement. Each editor remembers its connection; the status bar and first-line
   CodeLens show it. A fresh editor uses the only live connection if there is exactly one, and asks when it would be a guess.

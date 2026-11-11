@@ -39,6 +39,58 @@ input[type="text"], input[type="password"], input[type="number"], input[type="se
 input::placeholder { color: var(--vscode-input-placeholderForeground); }
 select { appearance: auto; }
 
+/* Checkboxes and radios drawn the way VS Code draws its own, from the theme's checkbox colours. */
+input[type="checkbox"], input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+  color: var(--vscode-checkbox-foreground, var(--vscode-foreground));
+  background: var(--vscode-checkbox-background);
+  border: 1px solid var(--vscode-checkbox-border, var(--vscode-input-border, currentColor));
+}
+input[type="checkbox"] { border-radius: 3px; }
+input[type="radio"] { border-radius: 50%; }
+input[type="checkbox"]::after {
+  content: "";
+  width: 16px;
+  height: 16px;
+  background: currentColor;
+  visibility: hidden;
+  -webkit-mask: var(--check-mask) center / 16px no-repeat;
+  mask: var(--check-mask) center / 16px no-repeat;
+  --check-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M14.431 3.323l-8.47 10-.79-.036-3.35-4.77.818-.574 2.978 4.24 8.051-9.506.764.646z'/></svg>");
+}
+input[type="radio"]::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  visibility: hidden;
+}
+input[type="checkbox"]:checked::after, input[type="radio"]:checked::after { visibility: visible; }
+input[type="checkbox"]:disabled, input[type="radio"]:disabled { opacity: 0.5; cursor: default; }
+input[readonly] { cursor: default; }
+input.locked { opacity: 0.7; }
+
+/* the clear button of search fields, in the theme's icon colour instead of Chromium's blue */
+input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  cursor: pointer;
+  background: var(--vscode-icon-foreground, currentColor);
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M8 8.707l3.646 3.647.708-.707L8.707 8l3.647-3.646-.707-.708L8 7.293 4.354 3.646l-.707.708L7.293 8l-3.646 3.646.707.708L8 8.707z'/></svg>") center / 14px no-repeat;
+  opacity: 0.8;
+}
+
 .muted { color: var(--vscode-descriptionForeground); }
 
 @media (prefers-reduced-motion: reduce) {

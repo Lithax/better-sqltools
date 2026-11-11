@@ -37,3 +37,37 @@ export function hasImageIcon(source: IconSource | undefined): boolean {
   const files = typeof icon === 'string' ? [icon] : [icon.light, icon.dark];
   return files.every((f) => isImageIcon(f) && resolve(source?.iconBase, f));
 }
+
+const MIME: Record<string, string> = { svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+const MAX_ICON_BYTES = 256 * 1024;
+
+/** An icon a webview can show without being allowed to read the driver's extension folder. */
+export interface IconData {
+  light: string;
+  dark: string;
+}
+
+async function dataUri(base: string | undefined, rel: string): Promise<string | undefined> {
+  const uri = isImageIcon(rel) ? resolve(base, rel) : undefined;
+  const mime = MIME[rel.slice(rel.lastIndexOf('.') + 1).toLowerCase()];
+  if (!uri || !mime) return undefined;
+  try {
+    const bytes = await vscode.workspace.fs.readFile(uri);
+    if (bytes.byteLength > MAX_ICON_BYTES) return undefined;
+    return `data:${mime};base64,${Buffer.from(bytes).toString('base64')}`;
+  } catch {
+    return undefined; // a missing or unreadable icon just means the generic one is shown
+  }
+}
+
+/**
+ * The driver's image icon as `data:` URIs for a webview (the same image twice unless it ships a light and a dark one).
+ * Codicons and missing files give undefined; the page draws its own generic database glyph.
+ */
+export async function iconData(source: IconSource | undefined): Promise<IconData | undefined> {
+  const icon = source?.icon;
+  if (!icon) return undefined;
+  const [light, dark] = typeof icon === 'string' ? [icon, icon] : [icon.light, icon.dark];
+  const [l, d] = await Promise.all([dataUri(source?.iconBase, light), dataUri(source?.iconBase, dark)]);
+  return l && d ? { light: l, dark: d } : undefined;
+}

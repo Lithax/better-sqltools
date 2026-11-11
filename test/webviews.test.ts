@@ -211,7 +211,10 @@ test('form: renders fields from the driver schema, including defaults', () => {
   assert.deepEqual(p.posted, [{ type: 'ready' }]);
   p.send(init());
   assert.equal(p.text('h1'), 'New connection');
-  assert.deepEqual(p.$$('select#driver option').map((o) => o.textContent), ['PostgreSQL', 'SQLite'].sort().length === 2 ? ['SQLite', 'PostgreSQL'] : []);
+  const driver = p.$('#driver') as HTMLInputElement;
+  assert.equal(driver.value, 'SQLite');
+  assert.equal(driver.readOnly, true, 'the field shows the driver, the picker changes it');
+  assert.equal((p.$('#choose-driver') as HTMLButtonElement).disabled, false);
   assert.ok(p.$('#f-path'));
   assert.equal((p.$('#f-createIfMissing') as HTMLInputElement).checked, true);
   assert.equal((p.$('#f-readOnly') as HTMLInputElement).checked, false);
@@ -224,15 +227,130 @@ test('form: renders fields from the driver schema, including defaults', () => {
 test('form: switching driver re-renders its fields; select and password fields behave', () => {
   const p = boot('connection-form');
   p.send(init());
-  const d = p.$('#driver') as HTMLSelectElement;
-  d.value = 'pg';
-  d.dispatchEvent(new p.w.Event('change', { bubbles: true }));
+  pickDriver(p, 'PostgreSQL');
+  assert.equal((p.$('#driver') as HTMLInputElement).value, 'PostgreSQL');
   assert.ok(p.$('#f-host') && p.$('#f-port') && p.$('#f-ssl') && p.$('#f-password'));
   assert.equal(p.$('#f-path'), null);
   assert.equal((p.$('#f-ssl') as HTMLSelectElement).value, 'prefer');
   assert.equal((p.$('#f-password') as HTMLInputElement).type, 'password');
   assert.match((p.$('#f-password') as HTMLInputElement).placeholder, /Asked when you connect/);
   assert.ok(p.$$('.check').some((c) => /Remember password/.test(c.textContent!)));
+});
+
+type Page = ReturnType<typeof boot>;
+const dialogButton = (p: Page, label: string) => p.$$('.dialog button').find((b) => b.textContent === label) as HTMLButtonElement;
+const card = (p: Page, name: string) => p.$$('.driver-card').find((c) => c.textContent!.includes(name))!;
+/** Opens the picker, selects a driver by name and confirms. */
+function pickDriver(p: Page, name: string) {
+  p.click(p.$('#choose-driver'));
+  p.click(card(p, name));
+  p.click(dialogButton(p, 'Select'));
+}
+const key = (p: Page, k: string, el: Element = p.doc.activeElement!) => el.dispatchEvent(new p.w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+const icon = { light: 'data:image/svg+xml;base64,AAA', dark: 'data:image/svg+xml;base64,AAA' };
+
+test('form: the driver picker shows icons and names, filters by search, and cannot select drivers that are unavailable', () => {
+  const p = boot('connection-form');
+  p.send(init({ drivers: [{ ...sqliteDescriptor, iconData: icon }, fakePg], unavailable: [{ id: 'ora', displayName: 'Oracle', state: 'failed', error: 'Cannot find module oracledb' }, { id: 'sf', displayName: 'Snowflake', state: 'inactive' }] }));
+  assert.equal(p.$('.overlay'), null, 'closed until asked for');
+  assert.equal(p.$('#driver-hint')!.textContent, sqliteDescriptor.description);
+
+  p.click(p.$('#choose-driver'));
+  assert.equal(p.$('.dialog')!.getAttribute('role'), 'dialog');
+  assert.equal(p.doc.activeElement, p.$('input[type=search]'), 'typing starts straight away');
+  assert.deepEqual(p.$$('.driver-card').map((c) => c.querySelector('.driver-name')!.textContent), ['SQLite', 'PostgreSQL', 'Oracle', 'Snowflake']);
+  assert.equal(card(p, 'SQLite').querySelector('img')!.getAttribute('src'), icon.dark, 'the driver’s own icon');
+  assert.ok(card(p, 'PostgreSQL').querySelector('svg.glyph'), 'a driver without an image gets the generic glyph');
+  assert.equal(card(p, 'SQLite').getAttribute('aria-selected'), 'true', 'the current driver starts selected');
+  assert.match(p.text('.picker-count'), /2 drivers, 2 not available/);
+  assert.equal(card(p, 'Oracle').getAttribute('aria-disabled'), 'true');
+  assert.match(card(p, 'Oracle').getAttribute('title')!, /oracledb/, 'the reason is on hover');
+  assert.match(card(p, 'Oracle').textContent!, /Failed to load/);
+  assert.match(card(p, 'Snowflake').textContent!, /Not loaded/);
+
+  p.click(card(p, 'Oracle'));
+  assert.equal(card(p, 'SQLite').getAttribute('aria-selected'), 'true', 'clicking an unavailable driver does nothing');
+
+  p.type(p.$('input[type=search]') as HTMLInputElement, 'POST');
+  assert.deepEqual(p.$$('.driver-card').map((c) => c.querySelector('.driver-name')!.textContent), ['PostgreSQL'], 'case-insensitive, by name');
+  p.type(p.$('input[type=search]') as HTMLInputElement, 'zzz');
+  assert.equal(p.$$('.driver-card').length, 0);
+  assert.match(p.text('.picker-count'), /No driver matches “zzz”/);
+  p.type(p.$('input[type=search]') as HTMLInputElement, 'postgres');
+  assert.equal(p.$$('.driver-card').length, 1, 'by id too');
+});
+
+test('form: picking a driver replaces the fields; cancelling keeps everything as it was', () => {
+  const p = boot('connection-form');
+  p.send(init());
+  p.type(p.$('#f-path') as HTMLInputElement, '/tmp/a.db');
+
+  p.click(p.$('#choose-driver'));
+  p.click(card(p, 'PostgreSQL'));
+  p.click(dialogButton(p, 'Cancel'));
+  assert.equal(p.$('.overlay'), null);
+  assert.equal((p.$('#driver') as HTMLInputElement).value, 'SQLite');
+  assert.equal((p.$('#f-path') as HTMLInputElement).value, '/tmp/a.db', 'cancel changes nothing');
+  assert.equal(p.doc.activeElement, p.$('#choose-driver'), 'focus goes back to the button');
+
+  p.click(p.$('#choose-driver'));
+  p.click(card(p, 'SQLite'));
+  p.click(dialogButton(p, 'Select'));
+  assert.equal((p.$('#f-path') as HTMLInputElement).value, '/tmp/a.db', 'choosing the same driver keeps what was typed');
+
+  pickDriver(p, 'PostgreSQL');
+  assert.ok(p.$('#f-host'));
+  assert.equal(p.$('#f-path'), null);
+  assert.equal(p.$('#driver-hint')!.textContent, 'Postgres.');
+  p.click(p.$$('.actions button').find((b) => /Test/.test(b.textContent!))!);
+  assert.equal(p.last('test').draft.driver, 'pg');
+});
+
+test('form: the picker works from the keyboard', () => {
+  const p = boot('connection-form');
+  p.send(init());
+  p.click(p.$('#choose-driver'));
+
+  key(p, 'ArrowDown'); // from the search field into the grid
+  assert.equal(p.doc.activeElement, card(p, 'SQLite'));
+  key(p, 'ArrowRight');
+  assert.equal(card(p, 'PostgreSQL').getAttribute('aria-selected'), 'true');
+  assert.equal(p.doc.activeElement, card(p, 'PostgreSQL'), 'focus follows the selection');
+  key(p, 'ArrowLeft');
+  key(p, 'ArrowLeft');
+  assert.equal(card(p, 'SQLite').getAttribute('aria-selected'), 'true', 'stops at the first');
+  key(p, 'ArrowRight');
+  key(p, 'Enter');
+  assert.equal(p.$('.overlay'), null);
+  assert.equal((p.$('#driver') as HTMLInputElement).value, 'PostgreSQL');
+
+  p.click(p.$('#choose-driver'));
+  key(p, 'Escape');
+  assert.equal(p.$('.overlay'), null, 'Escape closes');
+  assert.equal((p.$('#driver') as HTMLInputElement).value, 'PostgreSQL');
+
+  // Tab stays inside the dialog
+  p.click(p.$('#choose-driver'));
+  const last = dialogButton(p, 'Select');
+  last.focus();
+  key(p, 'Tab');
+  assert.equal(p.doc.activeElement, p.$('input[type=search]'), 'wraps from the last control to the first');
+  key(p, 'Tab', p.$('input[type=search]'));
+  key(p, 'Escape');
+});
+
+test('form: Install more drivers asks the host, and a driver that arrives meanwhile shows up', () => {
+  const p = boot('connection-form');
+  p.send(init());
+  p.click(p.$('#choose-driver'));
+  assert.equal(p.$$('.driver-card').length, 2);
+  p.click(dialogButton(p, 'Install more drivers…'));
+  assert.deepEqual(p.last('findDrivers'), { type: 'findDrivers' });
+  assert.ok(p.$('.overlay'), 'the picker stays open while the marketplace opens');
+
+  p.send({ type: 'drivers', drivers: [sqliteDescriptor, fakePg, { ...fakePg, id: 'duck', displayName: 'DuckDB' }], unavailable: [] });
+  assert.deepEqual(p.$$('.driver-card').map((c) => c.querySelector('.driver-name')!.textContent), ['SQLite', 'PostgreSQL', 'DuckDB']);
+  assert.equal(card(p, 'SQLite').getAttribute('aria-selected'), 'true', 'the selection survives the update');
 });
 
 test('form: validates locally, then posts a clean payload', () => {
@@ -276,7 +394,8 @@ test('form: browse round trip, edit mode, stored secrets and workspace-less wind
   const p = boot('connection-form');
   p.send(init({ mode: 'edit', canUseWorkspace: false, storedSecrets: ['password'], profile: { name: 'Prod', driver: 'pg', options: { host: 'db' }, scope: 'user' } }));
   assert.equal(p.text('h1'), 'Edit connection');
-  assert.equal((p.$('#driver') as HTMLSelectElement).disabled, true);
+  assert.equal((p.$('#driver') as HTMLInputElement).value, 'PostgreSQL');
+  assert.equal((p.$('#choose-driver') as HTMLButtonElement).disabled, true, 'a connection keeps its driver');
   assert.equal(p.$$('input[name=scope]').length, 0, 'no workspace, no scope choice');
   assert.equal((p.$('#f-host') as HTMLInputElement).value, 'db');
   assert.match((p.$('#f-password') as HTMLInputElement).placeholder, /Saved\. Type to replace it/);

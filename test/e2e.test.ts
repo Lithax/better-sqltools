@@ -107,6 +107,46 @@ test('connection form: generated from the driver schema, validates, tests and sa
   assert.deepEqual(profilesInSettings(), [{ id: 'local', name: 'Local', driver: 'sqlite', options: { path: '${workspaceFolder}/e2e.db' } }]);
 });
 
+test('connection form: the driver picker gets icons, the drivers that cannot be used, and live updates', async () => {
+  const media = path.join(ws, '.mock-extensions', 'better-sqltools.better-sqltools-sqlite', 'media');
+  fs.mkdirSync(media, { recursive: true });
+  fs.copyFileSync(path.join(__dirname, '..', 'drivers', 'sqlite', 'media', 'sqlite.svg'), path.join(media, 'sqlite.svg'));
+  const broken = mock.addExtension({
+    id: 'acme.broken-driver',
+    packageJSON: { version: '1.0.0', betterSqlTools: { drivers: [{ id: 'broken', name: 'Broken DB', icon: 'media/gone.png' }] } },
+    activate: () => { throw new Error('Cannot find module oracledb'); },
+  });
+  await run('newConnection');
+  const panel = state.panels.at(-1)!;
+  let reg: { dispose(): void } | undefined;
+  try {
+    await panel.send({ type: 'ready' });
+    const init = panel.last('init');
+    assert.deepEqual(init.drivers.map((d: any) => d.id), ['sqlite']);
+    assert.match(init.drivers[0].iconData.dark, /^data:image\/svg\+xml;base64,/, 'the icon travels with the message, so the page needs no access to the driver\u2019s folder');
+    assert.equal(init.drivers[0].iconData.light, init.drivers[0].iconData.dark);
+    assert.deepEqual(init.unavailable.map((d: any) => [d.id, d.displayName, d.state]), [['broken', 'Broken DB', 'failed']]);
+    assert.match(init.unavailable[0].error, /oracledb/);
+    assert.equal(init.unavailable[0].iconData, undefined, 'a missing icon file means the generic glyph');
+
+    await panel.send({ type: 'findDrivers' });
+    assert.ok(state.executed.some(([id]) => id === 'betterSqlTools.findDrivers'), 'Install more drivers opens the marketplace search');
+
+    reg = api.registerDriver(fakeFactory({ opened: 0, closed: 0, executed: [], openDelayMs: 0 }));
+    const update = await waitFor(() => {
+      const m = panel.last('drivers'); // earlier messages come from the broken extension failing to start
+      return m?.drivers.some((d: any) => d.id === 'fake') ? m : undefined;
+    });
+    assert.deepEqual(update.drivers.map((d: any) => d.id).sort(), ['fake', 'sqlite'], 'a driver installed while the form is open appears in the picker');
+    assert.equal(update.drivers.find((d: any) => d.id === 'fake').connectionSchema.length > 0, true, 'with its schema, so it can be selected right away');
+  } finally {
+    reg?.dispose();
+    panel.dispose();
+    state.extensions.splice(state.extensions.indexOf(broken), 1);
+    mock.events.extChange.fire();
+  }
+});
+
 test('connection form: browsing inside the workspace stores a portable path', async () => {
   await run('newConnection');
   const panel = state.panels.at(-1)!;
