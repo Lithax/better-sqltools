@@ -8,6 +8,7 @@ import { registerCommands } from './adapters/vscode/commands';
 import { SqlCompletionProvider } from './adapters/vscode/completion';
 import { LintController, SqlFixActions, SqlFormatter } from './adapters/vscode/diagnostics';
 import { VsCodeDriverExtensions } from './adapters/vscode/driver-extensions';
+import { VsCodeBookmarks } from './adapters/vscode/bookmark-repository';
 import { VsCodeHistory } from './adapters/vscode/history-repository';
 import { VsCodeLogger } from './adapters/vscode/logger';
 import { SettingsProfileRepository } from './adapters/vscode/profile-repository';
@@ -18,6 +19,7 @@ import { VsCodeSettings } from './adapters/vscode/settings';
 import { ConnectionStatusBar } from './adapters/vscode/status-bar';
 import { ConnectionsDragAndDrop, ConnectionsTree, DriversTree } from './adapters/vscode/trees';
 import { resolvePath, resolveVariables } from './adapters/vscode/variables';
+import { BookmarkService } from './application/bookmark-service';
 import { CompletionService } from './application/completion-service';
 import { ConnectionManager } from './application/connection-manager';
 import { DriverDirectory } from './application/driver-directory';
@@ -58,6 +60,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
   const groups = new GroupService({ groups: groupStore, project, profiles });
   const secrets = new VsCodeSecretStore(context.secrets);
   const history = new VsCodeHistory(context.globalState, () => settings.historyLimit());
+  const bookmarks = new BookmarkService(new VsCodeBookmarks(context.globalState));
   const prompter: SecretPrompter = {
     prompt: async ({ profileName, field }) =>
       vscode.window.showInputBox({ title: `Connect to ${profileName}`, prompt: field.label, password: true, ignoreFocusOut: true }),
@@ -91,7 +94,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
 
   const app: App = {
     context, logger, settings, registry, drivers, project, groups, connections, schema, queries, completion, lint,
-    profiles, secrets, history, bindings, runner, linting,
+    profiles, secrets, history, bookmarks, bindings, runner, linting,
   };
 
   // Drivers are plugins: other extensions register them through the exported API. This view of what

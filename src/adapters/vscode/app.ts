@@ -1,4 +1,5 @@
 import type * as vscode from 'vscode';
+import type { BookmarkService } from '../../application/bookmark-service';
 import type { CompletionService } from '../../application/completion-service';
 import type { ConnectionManager } from '../../application/connection-manager';
 import type { DriverDirectory } from '../../application/driver-directory';
@@ -34,6 +35,7 @@ export interface App {
   project: ProjectConfigService;
   secrets: VsCodeSecretStore;
   history: HistoryRepository;
+  bookmarks: BookmarkService;
   bindings: EditorBindings;
   runner: QueryRunner;
   linting: LintController;

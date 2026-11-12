@@ -4,19 +4,16 @@ import type { CatalogTable, ConnectionId, ConnectionProfile, HistoryEntry, Schem
 import { selectSample } from '../../domain/sql/generate';
 import { splitStatements, statementAt } from '../../domain/sql/splitter';
 import { tokenizerOptions } from '../../domain/sql/tokenizer';
+import { oneLine } from '../../domain/text';
 import type { App } from './app';
 import { ConnectionForm } from './connection-form';
 import { cwdFor, fullRange } from './diagnostics';
+import { registerHistoryAndBookmarks } from './history-bookmarks';
 import { slug } from './profile-repository';
 import { InspectView } from './inspect-view';
 import { CONFIG_FILE } from './project-files';
 import { PROJECT_TEMPLATE } from './project-template';
 import type { ConnectionsTree, TreeNode } from './trees';
-
-const oneLine = (s: string, n: number) => {
-  const t = s.replace(/\s+/g, ' ').trim();
-  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
-};
 
 interface ConnectionPick extends vscode.QuickPickItem {
   id: ConnectionId;
@@ -112,6 +109,17 @@ export function registerCommands(app: App, tree: ConnectionsTree): vscode.Dispos
     await vscode.window.showTextDocument(doc, { preview: false });
   }
 
+  /** The selection if there is one, else the statement at the cursor (or at `at`). Undefined when there is none. */
+  function statementSql(doc: vscode.TextDocument, connectionId: ConnectionId | undefined, at?: { offset: number }): string | undefined {
+    const editor = vscode.window.activeTextEditor;
+    const inEditor = editor?.document === doc;
+    const selected = !at && inEditor && !editor.selection.isEmpty ? doc.getText(editor.selection) : '';
+    if (selected.trim()) return selected;
+    const dialect = connectionId ? connections.info(connectionId)?.descriptor?.dialect : undefined;
+    const offset = at?.offset ?? (inEditor ? doc.offsetAt(editor.selection.active) : 0);
+    return statementAt(splitStatements(doc.getText(), tokenizerOptions(dialect)), offset)?.text;
+  }
+
   async function runIn(mode: 'statement' | 'file', at?: { uri: vscode.Uri; offset: number }) {
     const editor = vscode.window.activeTextEditor;
     const doc = at ? await vscode.workspace.openTextDocument(at.uri) : editor?.document;
@@ -123,16 +131,9 @@ export function registerCommands(app: App, tree: ConnectionsTree): vscode.Dispos
     if (mode === 'file') {
       sql = doc.getText();
     } else {
-      const selected = !at && editor?.document === doc && !editor.selection.isEmpty ? doc.getText(editor.selection) : '';
-      if (selected.trim()) {
-        sql = selected;
-      } else {
-        const dialect = connections.info(connectionId)?.descriptor?.dialect;
-        const offset = at?.offset ?? doc.offsetAt(editor!.selection.active);
-        const st = statementAt(splitStatements(doc.getText(), tokenizerOptions(dialect)), offset);
-        if (!st) return void vscode.window.showInformationMessage('There is no SQL statement at the cursor.');
-        sql = st.text;
-      }
+      const found = statementSql(doc, connectionId, at);
+      if (!found) return void vscode.window.showInformationMessage('There is no SQL statement at the cursor.');
+      sql = found;
     }
     if (!sql.trim()) return void vscode.window.showInformationMessage('Nothing to run.');
     await app.runner.run(connectionId, sql);
@@ -402,6 +403,8 @@ export function registerCommands(app: App, tree: ConnectionsTree): vscode.Dispos
       const ok = await vscode.window.showWarningMessage('Clear the query history?', { modal: true }, 'Clear');
       if (ok) await app.history.clear();
     }),
+
+    ...registerHistoryAndBookmarks(app, { cmd, openSql, pickConnection, statementSql }),
 
     cmd('findDrivers', () => vscode.commands.executeCommand('workbench.extensions.search', '@tag:better-sqltools-driver')),
 

@@ -129,6 +129,16 @@ export interface HistoryEntry {
   ok: boolean;
 }
 
+/** A saved query. */
+export interface Bookmark {
+  id: string;
+  name: string;
+  sql: string;
+  /** The connection it was saved from; the one it runs on by default when that still exists. */
+  connectionId?: ConnectionId;
+  createdAt: number;
+}
+
 export type LintSeverity = 'error' | 'warning' | 'info';
 
 export interface LintIssue {

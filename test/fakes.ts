@@ -2,12 +2,12 @@ import { ConnectionManager } from '../src/application/connection-manager';
 import { DriverRegistry } from '../src/application/driver-registry';
 import { Emitter } from '../src/application/events';
 import type {
-  Driver, DriverFactory, HistoryRepository, ProfileRepository, SecretPrompter, SecretStore, SettingsReader,
+  BookmarkRepository, Driver, DriverFactory, HistoryRepository, ProfileRepository, SecretPrompter, SecretStore, SettingsReader,
 } from '../src/application/ports';
 import { QueryService } from '../src/application/query-service';
 import { SchemaService } from '../src/application/schema-service';
 import type { DriverDescriptor } from '../src/domain/driver-descriptor';
-import type { ConnectionProfile, HistoryEntry } from '../src/domain/model';
+import type { Bookmark, ConnectionProfile, HistoryEntry } from '../src/domain/model';
 import { silentLogger, testEnv } from './helpers';
 
 export class MemoryProfiles implements ProfileRepository {
@@ -34,9 +34,21 @@ export class MemorySecrets implements SecretStore {
 
 export class MemoryHistory implements HistoryRepository {
   entries: HistoryEntry[] = [];
-  async add(e: HistoryEntry) { this.entries.unshift(e); }
+  private readonly changed = new Emitter<void>();
+  readonly onDidChange = this.changed.event;
+  async add(e: HistoryEntry) { this.entries.unshift(e); this.changed.fire(); }
   list() { return this.entries; }
-  async clear() { this.entries = []; }
+  async remove(id: string) { this.entries = this.entries.filter((e) => e.id !== id); this.changed.fire(); }
+  async clear() { this.entries = []; this.changed.fire(); }
+}
+
+/** Bookmarks kept in memory, for tests of the service. */
+export class MemoryBookmarks implements BookmarkRepository {
+  items: Bookmark[] = [];
+  private readonly changed = new Emitter<void>();
+  readonly onDidChange = this.changed.event;
+  list() { return this.items; }
+  async save(all: Bookmark[]) { this.items = all; this.changed.fire(); }
 }
 
 export const settings: SettingsReader = {

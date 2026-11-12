@@ -18,7 +18,8 @@ const viewIds: string[] = Object.values<{ id: string }[]>(pkg.contributes.views)
 const configKeys = Object.keys(pkg.contributes.configuration.properties);
 
 test('every contributed command has a handler, and every handler is contributed', () => {
-  const registered = [...read('src/adapters/vscode/commands.ts').matchAll(/\bcmd\('([A-Za-z]+)'/g)].map((m) => `betterSqlTools.${m[1]}`);
+  const sources = ['src/adapters/vscode/commands.ts', 'src/adapters/vscode/history-bookmarks.ts'];
+  const registered = sources.flatMap((f) => [...read(f).matchAll(/\bcmd\('([A-Za-z.]+)'/g)].map((m) => `betterSqlTools.${m[1]}`));
   assert.deepEqual([...registered].sort(), [...declaredCommands].sort());
 });
 
@@ -39,7 +40,7 @@ test('menu "view ==" clauses name declared views', () => {
 });
 
 test('every betterSqlTools.* identifier in the source is a command, view, setting or known id', () => {
-  const known = new Set<string>([...declaredCommands, ...viewIds, 'betterSqlTools.connectionForm', 'betterSqlTools.history', 'betterSqlTools.bindings', 'betterSqlTools.hasDrivers', 'betterSqlTools.filterActive', 'betterSqlTools.inspect']);
+  const known = new Set<string>([...declaredCommands, ...viewIds, 'betterSqlTools.connectionForm', 'betterSqlTools.history', 'betterSqlTools.bindings', 'betterSqlTools.hasDrivers', 'betterSqlTools.filterActive', 'betterSqlTools.historyFilterActive', 'betterSqlTools.inspect']);
   const sections = new Set(configKeys.flatMap((k) => k.split('.').map((_, i, a) => a.slice(0, i + 1).join('.'))));
   const unknown: string[] = [];
   for (const f of sourceFiles('src')) {

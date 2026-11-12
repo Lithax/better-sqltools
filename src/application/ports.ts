@@ -8,7 +8,7 @@
 import type { ConnectionGroup } from '../domain/model';
 import type { ConnectionField, DriverDescriptor, DriverIcon } from '../domain/driver-descriptor';
 import type {
-  Catalog, Column, ConnectionId, ConnectionProfile, DriverInspection, HistoryEntry, LintIssue, SchemaNode,
+  Bookmark, Catalog, Column, ConnectionId, ConnectionProfile, DriverInspection, HistoryEntry, LintIssue, SchemaNode,
 } from '../domain/model';
 import type { Event } from './events';
 
@@ -115,7 +115,18 @@ export interface SecretPrompter {
 export interface HistoryRepository {
   add(entry: HistoryEntry): Promise<void>;
   list(): HistoryEntry[];
+  remove(id: string): Promise<void>;
   clear(): Promise<void>;
+  /** Fires after any change, so views can refresh. */
+  readonly onDidChange: Event<void>;
+}
+
+export interface BookmarkRepository {
+  list(): Bookmark[];
+  /** Replaces everything that is stored. */
+  save(all: Bookmark[]): Promise<void>;
+  /** Fires after any change, so views can refresh. */
+  readonly onDidChange: Event<void>;
 }
 
 export interface SettingsReader {

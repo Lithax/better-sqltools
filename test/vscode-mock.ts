@@ -68,6 +68,7 @@ class Memento {
   private m = new Map<string, unknown>();
   get<T>(k: string, d?: T): T { return (this.m.has(k) ? this.m.get(k) : d) as T; }
   async update(k: string, v: unknown) { if (v === undefined) this.m.delete(k); else this.m.set(k, JSON.parse(JSON.stringify(v))); }
+  keys(): readonly string[] { return [...this.m.keys()]; }
 }
 
 /** An installed extension as `vscode.extensions` shows it. */
@@ -89,6 +90,7 @@ export interface MockState {
   resultsMessages: any[];
   resultsHandler?: Fn;
   decorationProvider?: any;
+  treeViews: Record<string, any>;
   panels: MockPanel[];
   providers: { completion?: any; formatting?: any; codeActions?: any; codeLens?: any };
   diagnostics: Map<string, any[]>;
@@ -148,7 +150,7 @@ export class MockEditor {
 
 export function installVscodeMock(folder: string) {
   const state: MockState = {
-    commands: new Map(), executed: [], treeProviders: {}, treeViewOptions: {}, webviewViewProviders: {}, resultsMessages: [], panels: [],
+    commands: new Map(), executed: [], treeProviders: {}, treeViewOptions: {}, treeViews: {}, webviewViewProviders: {}, resultsMessages: [], panels: [],
     providers: {}, diagnostics: new Map(), statusBar: {}, messages: [], quickPickAnswers: [], inputAnswers: [],
     messageAnswers: [], openDialogAnswers: [], saveDialogAnswers: [], config: { user: {}, workspace: {} },
     clipboard: '', documents: [], secrets: new Map(), folder, logs: [], extensions: [],
@@ -228,7 +230,13 @@ export function installVscodeMock(folder: string) {
 
     window: {
       createOutputChannel: () => ({ debug: (m: string) => state.logs.push(m), info: (m: string) => state.logs.push(m), warn: (m: string) => state.logs.push(m), error: (m: string) => state.logs.push(m), show() {}, dispose() {} }),
-      createTreeView: (id: string, o: any) => { state.treeProviders[id] = o.treeDataProvider; state.treeViewOptions[id] = o; return { dispose() {} }; },
+      createTreeView: (id: string, o: any) => {
+        state.treeProviders[id] = o.treeDataProvider;
+        state.treeViewOptions[id] = o;
+        const view: any = { dispose() {}, reveal: async () => {}, onDidChangeSelection: () => ({ dispose() {} }), onDidChangeVisibility: () => ({ dispose() {} }) };
+        state.treeViews[id] = view; // tests read what the extension sets on it: message, description, title
+        return view;
+      },
       registerTreeDataProvider: (id: string, p: any) => { state.treeProviders[id] = p; return { dispose() {} }; },
       registerWebviewViewProvider: (id: string, p: any) => { state.webviewViewProviders[id] = p; return { dispose() {} }; },
       registerFileDecorationProvider: (p: any) => { state.decorationProvider = p; return { dispose() {} }; },

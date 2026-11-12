@@ -37,6 +37,16 @@ To install them for real: `npm run package` and `npm run package:sqlite`, then
 * **Run SQL.** `Ctrl/Cmd+Enter` runs the statement under the cursor (or the selection), `Ctrl/Cmd+Shift+Enter` the whole
   file. A *Run* CodeLens sits above every statement. Each editor remembers its connection; the status bar and first-line
   CodeLens show it. A fresh editor uses the only live connection if there is exactly one, and asks when it would be a guess.
+* **Query history.** A *Query History* view lists every statement you ran, newest first and grouped by day, with the
+  connection, time and duration, a tick or a cross, and the SQL in the tooltip. Click an entry to open it in an editor on
+  the connection it ran on (or pick another if that one is gone); *Run Again*, *Copy SQL*, *Bookmark Query* and *Delete from
+  History* are on the inline buttons and the context menu, and several rows can be deleted at once. The filter button keeps
+  the entries that contain every word you type, in the SQL or the connection's name. `betterSqlTools.history.maxEntries`
+  caps how many are kept.
+* **Bookmarks.** *Bookmark Query* (editor context menu, palette, or from a history entry) saves the selection or the
+  statement under the cursor under a name you choose, with the connection it came from. The *Bookmarks* view lists them
+  by name; open, run, rename, copy or delete from there, or use *Run Bookmarked Query…* from the palette. Bookmarks are
+  stored in VS Code's global state, so they follow you into every workspace.
 * **Results panel.** A virtualised grid in the bottom panel: sticky header, click-to-sort, row filter, `NULL` and numbers
   styled, copy a cell or the visible rows, export CSV or JSON. One tab per statement, errors shown in place, a row limit
   (`betterSqlTools.results.maxRows`) that the driver honours, and Cancel between statements.

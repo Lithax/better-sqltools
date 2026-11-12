@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+* **Query History view**: statements grouped by day (newest first) with connection, time, duration and a pass/fail icon;
+  open, run again, copy, bookmark and delete (several at once) from inline buttons or the context menu; a filter that
+  keeps entries containing every word typed. Replaces the quick pick as the main way to revisit a query (the palette
+  command *Show Query History* remains).
+* **Bookmarks**: *Bookmark Query* saves the selection or statement under the cursor with a name and its connection; a
+  *Bookmarks* view and *Run Bookmarked Query…* bring it back. Stored in global state, so they follow you across workspaces.
 * **Driver picker** in the connection form: a text field with a *Choose…* button opens a searchable grid of drivers with
   their icons, *Select* / *Cancel* and *Install more drivers…*. Drivers installed meanwhile appear live; unavailable ones
   are listed with the reason.

@@ -70,6 +70,16 @@
           "name": "Connections"
         },
         {
+          "id": "betterSqlTools.bookmarks",
+          "name": "Bookmarks",
+          "visibility": "collapsed"
+        },
+        {
+          "id": "betterSqlTools.history",
+          "name": "Query History",
+          "visibility": "collapsed"
+        },
+        {
           "id": "betterSqlTools.drivers",
           "name": "Drivers",
           "visibility": "collapsed"
@@ -93,6 +103,15 @@
         "view": "betterSqlTools.connections",
         "contents": "No connections yet.\n[New Connection](command:betterSqlTools.newConnection)\nOther databases come from driver extensions.\n[Find Drivers](command:betterSqlTools.findDrivers)",
         "when": "betterSqlTools.hasDrivers"
+      },
+      {
+        "view": "betterSqlTools.history",
+        "contents": "No queries yet.\nEvery statement you run is listed here, grouped by day.",
+        "when": "!betterSqlTools.historyFilterActive"
+      },
+      {
+        "view": "betterSqlTools.bookmarks",
+        "contents": "No bookmarks yet.\nPlace the cursor in a statement in a SQL editor to save it for later.\n[Bookmark Query](command:betterSqlTools.bookmarkQuery)\nYou can also bookmark a query from the Query History view."
       }
     ],
     "commands": [
@@ -268,6 +287,90 @@
         "command": "betterSqlTools.fixDocument",
         "title": "Fix Lint Issues with sqlfluff",
         "category": "Better SQLTools"
+      },
+      {
+        "command": "betterSqlTools.bookmarkQuery",
+        "title": "Bookmark Query",
+        "category": "Better SQLTools",
+        "icon": "$(bookmark)"
+      },
+      {
+        "command": "betterSqlTools.runBookmark",
+        "title": "Run Bookmarked Query…",
+        "category": "Better SQLTools",
+        "icon": "$(play)"
+      },
+      {
+        "command": "betterSqlTools.history.open",
+        "title": "Open in Editor",
+        "category": "Better SQLTools",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "betterSqlTools.history.run",
+        "title": "Run Again",
+        "category": "Better SQLTools",
+        "icon": "$(play)"
+      },
+      {
+        "command": "betterSqlTools.history.copy",
+        "title": "Copy SQL",
+        "category": "Better SQLTools",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "betterSqlTools.history.bookmark",
+        "title": "Bookmark Query…",
+        "category": "Better SQLTools",
+        "icon": "$(bookmark)"
+      },
+      {
+        "command": "betterSqlTools.history.delete",
+        "title": "Delete from History",
+        "category": "Better SQLTools",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "betterSqlTools.history.filter",
+        "title": "Filter History…",
+        "category": "Better SQLTools",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "betterSqlTools.history.clearFilter",
+        "title": "Clear History Filter",
+        "category": "Better SQLTools",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "betterSqlTools.bookmarks.open",
+        "title": "Open in Editor",
+        "category": "Better SQLTools",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "betterSqlTools.bookmarks.run",
+        "title": "Run",
+        "category": "Better SQLTools",
+        "icon": "$(play)"
+      },
+      {
+        "command": "betterSqlTools.bookmarks.copy",
+        "title": "Copy SQL",
+        "category": "Better SQLTools",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "betterSqlTools.bookmarks.rename",
+        "title": "Rename Bookmark…",
+        "category": "Better SQLTools",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "betterSqlTools.bookmarks.delete",
+        "title": "Delete Bookmark",
+        "category": "Better SQLTools",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -331,6 +434,54 @@
         {
           "command": "betterSqlTools.fixDocument",
           "when": "editorLangId == sql"
+        },
+        {
+          "command": "betterSqlTools.history.open",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.history.run",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.history.copy",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.history.bookmark",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.history.delete",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.bookmarks.open",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.bookmarks.run",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.bookmarks.copy",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.bookmarks.rename",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.bookmarks.delete",
+          "when": "false"
+        },
+        {
+          "command": "betterSqlTools.history.clearFilter",
+          "when": "betterSqlTools.historyFilterActive"
+        },
+        {
+          "command": "betterSqlTools.bookmarkQuery",
+          "when": "editorLangId == sql"
         }
       ],
       "view/title": [
@@ -388,6 +539,31 @@
           "command": "betterSqlTools.findDrivers",
           "when": "view == betterSqlTools.drivers",
           "group": "navigation"
+        },
+        {
+          "command": "betterSqlTools.history.filter",
+          "when": "view == betterSqlTools.history && !betterSqlTools.historyFilterActive",
+          "group": "navigation@1"
+        },
+        {
+          "command": "betterSqlTools.history.clearFilter",
+          "when": "view == betterSqlTools.history && betterSqlTools.historyFilterActive",
+          "group": "navigation@1"
+        },
+        {
+          "command": "betterSqlTools.clearHistory",
+          "when": "view == betterSqlTools.history",
+          "group": "9_manage@1"
+        },
+        {
+          "command": "betterSqlTools.bookmarkQuery",
+          "when": "view == betterSqlTools.bookmarks",
+          "group": "navigation@1"
+        },
+        {
+          "command": "betterSqlTools.runBookmark",
+          "when": "view == betterSqlTools.bookmarks",
+          "group": "1_run@1"
         }
       ],
       "view/item/context": [
@@ -495,6 +671,81 @@
           "command": "betterSqlTools.copyName",
           "when": "view == betterSqlTools.connections && viewItem =~ /^node\\.(table|view|column|schema|database)$/",
           "group": "9_copy"
+        },
+        {
+          "command": "betterSqlTools.history.run",
+          "when": "view == betterSqlTools.history && viewItem == historyEntry",
+          "group": "inline@1"
+        },
+        {
+          "command": "betterSqlTools.history.bookmark",
+          "when": "view == betterSqlTools.history && viewItem == historyEntry",
+          "group": "inline@2"
+        },
+        {
+          "command": "betterSqlTools.history.delete",
+          "when": "view == betterSqlTools.history && viewItem == historyEntry",
+          "group": "inline@3"
+        },
+        {
+          "command": "betterSqlTools.history.open",
+          "when": "view == betterSqlTools.history && viewItem == historyEntry",
+          "group": "1_open@1"
+        },
+        {
+          "command": "betterSqlTools.history.run",
+          "when": "view == betterSqlTools.history && viewItem == historyEntry",
+          "group": "1_open@2"
+        },
+        {
+          "command": "betterSqlTools.history.copy",
+          "when": "view == betterSqlTools.history && viewItem == historyEntry",
+          "group": "2_edit@1"
+        },
+        {
+          "command": "betterSqlTools.history.bookmark",
+          "when": "view == betterSqlTools.history && viewItem == historyEntry",
+          "group": "2_edit@2"
+        },
+        {
+          "command": "betterSqlTools.history.delete",
+          "when": "view == betterSqlTools.history && viewItem == historyEntry",
+          "group": "9_delete@1"
+        },
+        {
+          "command": "betterSqlTools.bookmarks.run",
+          "when": "view == betterSqlTools.bookmarks && viewItem == bookmark",
+          "group": "inline@1"
+        },
+        {
+          "command": "betterSqlTools.bookmarks.rename",
+          "when": "view == betterSqlTools.bookmarks && viewItem == bookmark",
+          "group": "inline@2"
+        },
+        {
+          "command": "betterSqlTools.bookmarks.open",
+          "when": "view == betterSqlTools.bookmarks && viewItem == bookmark",
+          "group": "1_open@1"
+        },
+        {
+          "command": "betterSqlTools.bookmarks.run",
+          "when": "view == betterSqlTools.bookmarks && viewItem == bookmark",
+          "group": "1_open@2"
+        },
+        {
+          "command": "betterSqlTools.bookmarks.copy",
+          "when": "view == betterSqlTools.bookmarks && viewItem == bookmark",
+          "group": "2_edit@1"
+        },
+        {
+          "command": "betterSqlTools.bookmarks.rename",
+          "when": "view == betterSqlTools.bookmarks && viewItem == bookmark",
+          "group": "2_edit@2"
+        },
+        {
+          "command": "betterSqlTools.bookmarks.delete",
+          "when": "view == betterSqlTools.bookmarks && viewItem == bookmark",
+          "group": "9_delete@1"
         }
       ],
       "editor/title": [
@@ -519,6 +770,11 @@
           "command": "betterSqlTools.selectConnection",
           "when": "editorLangId == sql",
           "group": "navigation@3"
+        },
+        {
+          "command": "betterSqlTools.bookmarkQuery",
+          "when": "editorLangId == sql",
+          "group": "navigation@4"
         }
       ]
     },
