@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* **Result columns know what they are.** A column read from a table carries its type, a driver-decided kind, and its
+  constraints (primary key, not null, unique, foreign key, auto-increment, default), taken from the driver's catalog.
+  Plain single-table `SELECT`s are traced to their table columns; anything the SQL makes unclear stays plain. A driver can
+  report `source` itself. The SQLite driver now reports kinds, unique columns, foreign keys, defaults and the rowid alias.
+  (The results grid will use this for type labels, colours and editing.)
 * **Query History view**: statements grouped by day (newest first) with connection, time, duration and a pass/fail icon;
   open, run again, copy, bookmark and delete (several at once) from inline buttons or the context menu; a filter that
   keeps entries containing every word typed. Replaces the quick pick as the main way to revisit a query (the palette

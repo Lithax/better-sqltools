@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { test } from 'node:test';
 import type { Driver } from '../../../src/api';
 import { SqliteDriverFactory } from '../src';
+import { sqliteKind } from '../src/types';
 import { testEnv, tmpDir } from '../../../test/helpers';
 
 const factory = new SqliteDriverFactory();
@@ -174,6 +175,64 @@ test('weird identifiers are quoted safely', async () => {
   assert.equal(nodes[0].qualifiedName, '"we""ird name"');
   assert.equal((await d.execute(`select * from ${nodes[0].qualifiedName}`, ctx)).columns[0].name, 'x');
   await d.close();
+});
+
+test('catalog: types, kinds and constraints come from the database, not from a guess', async () => {
+  const d = await open({ path: ':memory:' });
+  for (const sql of [
+    'create table authors (id integer primary key, name text not null unique, born date)',
+    `create table books (
+       id integer primary key, title varchar(80) not null, author_id integer references authors(id),
+       isbn text unique default 'n/a', price decimal(8,2), in_print boolean default 1, meta json, cover blob, anything,
+       a integer, b integer, unique (a, b))`,
+    'create table kv (k integer primary key, v text) without rowid',
+    'create table pairs (x integer, y integer, primary key (x, y))',
+    'create index books_title on books (title)',
+    'create unique index books_price_u on books (price) where price > 0',
+    'create view v as select title from books',
+  ]) await d.execute(sql, ctx);
+
+  const catalog = await d.catalog!();
+  const col = (table: string, name: string) => catalog.tables.find((t) => t.name === table)!.columns.find((c) => c.name === name)!;
+
+  assert.deepEqual(col('books', 'id'), { name: 'id', type: 'INTEGER', kind: 'integer', primaryKey: true, nullable: false, autoIncrement: true }, 'a lone INTEGER PRIMARY KEY is the rowid: filled in, never NULL');
+  assert.deepEqual(col('books', 'title'), { name: 'title', type: 'varchar(80)', kind: 'text', primaryKey: false, nullable: false });
+  assert.deepEqual(col('books', 'author_id').foreignKey, { table: 'authors', column: 'id' });
+  assert.equal(col('books', 'author_id').nullable, true);
+  assert.equal(col('books', 'isbn').unique, true);
+  assert.equal(col('books', 'isbn').defaultValue, "'n/a'", 'defaults come back as SQLite prints them');
+  assert.equal(col('books', 'in_print').kind, 'boolean');
+  assert.equal(col('books', 'in_print').defaultValue, '1');
+  assert.equal(col('books', 'price').kind, 'decimal');
+  assert.equal(col('books', 'price').unique, undefined, 'a partial unique index does not make the column unique');
+  assert.equal(col('books', 'meta').kind, 'json');
+  assert.equal(col('books', 'cover').kind, 'binary');
+  assert.equal(col('books', 'anything').type, undefined);
+  assert.equal(col('books', 'anything').kind, undefined, 'no declared type, no kind');
+  assert.equal(col('books', 'a').unique, undefined, 'one column of a composite unique constraint is not unique alone');
+  assert.equal(col('authors', 'name').unique, true);
+  assert.equal(col('authors', 'born').kind, 'datetime');
+  assert.equal(col('books', 'title').unique, undefined);
+
+  assert.equal(col('kv', 'k').primaryKey, true);
+  assert.equal(col('kv', 'k').autoIncrement, undefined, 'in a WITHOUT ROWID table INTEGER PRIMARY KEY is an ordinary column');
+  assert.equal(col('pairs', 'x').autoIncrement, undefined, 'nor is half of a composite key');
+  assert.equal(col('pairs', 'x').primaryKey, true);
+  assert.equal(col('v', 'title').kind, 'text', 'views carry the kinds of what they select');
+  assert.equal(col('v', 'title').autoIncrement, undefined);
+  await d.close();
+});
+
+test('sqliteKind: follows SQLite\u2019s affinity rules and knows the usual names', () => {
+  const kinds: Record<string, string | undefined> = {
+    INTEGER: 'integer', BIGINT: 'integer', 'UNSIGNED BIG INT': 'integer', TINYINT: 'integer',
+    'VARCHAR(30)': 'text', NVARCHAR: 'text', 'VARYING CHARACTER(255)': 'text', CLOB: 'text', TEXT: 'text',
+    REAL: 'decimal', DOUBLE: 'decimal', 'DOUBLE PRECISION': 'decimal', FLOAT: 'decimal', 'DECIMAL(10,5)': 'decimal', NUMERIC: 'decimal',
+    BLOB: 'binary', BOOLEAN: 'boolean', DATE: 'datetime', DATETIME: 'datetime', TIMESTAMP: 'datetime', JSON: 'json', jsonb: 'json',
+    'my own type': 'other', '': undefined, '   ': undefined,
+  };
+  for (const [type, kind] of Object.entries(kinds)) assert.equal(sqliteKind(type), kind, type);
+  assert.equal(sqliteKind(undefined), undefined);
 });
 
 test('blobs and big numbers come back as raw values for the core to normalise', async () => {

@@ -78,6 +78,23 @@ export class SchemaService {
     return p;
   }
 
+  /**
+   * The catalog if it is ready or becomes ready within `ms`; undefined after that, or when it cannot be loaded.
+   * For callers that are better off with less than with a wait: a result should show up promptly, with or without
+   * the column details the catalog adds.
+   */
+  async catalogSoon(id: ConnectionId, ms = 300): Promise<Catalog | undefined> {
+    const cached = this.catalogs.get(id);
+    if (cached) return cached;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), ms); });
+    try {
+      return await Promise.race([this.catalog(id).catch(() => undefined), late]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /** Load the catalog in the background so completion is ready by the time you type. */
   warm(id: ConnectionId): void {
     this.catalog(id).catch((e) => this.logger.warn(`Could not load schema for completion: ${errorMessage(e)}`));

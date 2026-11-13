@@ -2,7 +2,7 @@ import type { DialectInfo } from '../driver-descriptor';
 import type { Catalog, CatalogTable } from '../model';
 import { SQL_FUNCTIONS, SQL_KEYWORDS } from './keywords';
 import { splitStatements } from './splitter';
-import { tokenize, tokenizerOptions, type Token } from './tokenizer';
+import { tokenize, tokenizerOptions, unquoteIdentifier, type Token } from './tokenizer';
 
 export type CandidateKind = 'keyword' | 'function' | 'schema' | 'table' | 'view' | 'column';
 
@@ -50,13 +50,6 @@ const FROM_LIST_ENDERS = new Set([
 const isTrivia = (t: Token) => t.kind === 'whitespace' || t.kind === 'comment';
 const isName = (t: Token | undefined): t is Token => !!t && (t.kind === 'word' || t.kind === 'quoted');
 
-function unquote(text: string): string {
-  const f = text[0];
-  if (f === '"' || f === '`') return text.slice(1, text.endsWith(f) && text.length > 1 ? -1 : undefined).replace(new RegExp(f + f, 'g'), f);
-  if (f === '[') return text.slice(1, text.endsWith(']') ? -1 : undefined);
-  return text;
-}
-
 function parseTableRefs(sig: Token[]): TableRef[] {
   const refs: TableRef[] = [];
   let expect = false;
@@ -79,17 +72,17 @@ function parseTableRefs(sig: Token[]): TableRef[] {
     expect = false;
     if (!isName(t)) continue; // subquery or garbage
 
-    const parts = [unquote(t.text)];
+    const parts = [unquoteIdentifier(t.text)];
     while (sig[i + 1]?.text === '.' && isName(sig[i + 2])) {
-      parts.push(unquote(sig[i + 2].text));
+      parts.push(unquoteIdentifier(sig[i + 2].text));
       i += 2;
     }
     let alias: string | undefined;
     if (sig[i + 1]?.kind === 'word' && sig[i + 1].text.toUpperCase() === 'AS' && isName(sig[i + 2])) {
-      alias = unquote(sig[i + 2].text);
+      alias = unquoteIdentifier(sig[i + 2].text);
       i += 2;
     } else if (isName(sig[i + 1]) && !(sig[i + 1].kind === 'word' && NOT_AN_ALIAS.has(sig[i + 1].text.toUpperCase()))) {
-      alias = unquote(sig[i + 1].text);
+      alias = unquoteIdentifier(sig[i + 1].text);
       i += 1;
     }
     refs.push({ schema: parts.length > 1 ? parts[parts.length - 2] : undefined, name: parts[parts.length - 1], alias });
@@ -174,7 +167,7 @@ export function complete(req: CompletionRequest): CompletionResult {
     const parts: string[] = [];
     let i = before.length - 2;
     while (i >= 0 && isName(before[i])) {
-      parts.unshift(unquote(before[i].text));
+      parts.unshift(unquoteIdentifier(before[i].text));
       if (i - 1 >= 0 && before[i - 1].text === '.') i -= 2;
       else break;
     }

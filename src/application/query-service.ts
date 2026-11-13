@@ -1,5 +1,6 @@
+import { enrichColumns } from '../domain/columns';
 import { errorMessage } from '../domain/errors';
-import type { ConnectionId, QueryError, RunResult, StatementResult } from '../domain/model';
+import type { Catalog, ConnectionId, QueryError, RunResult, StatementResult } from '../domain/model';
 import { splitStatements } from '../domain/sql/splitter';
 import { tokenizerOptions } from '../domain/sql/tokenizer';
 import { toCell } from '../domain/value';
@@ -45,6 +46,7 @@ export class QueryService {
     let results: StatementResult[] = [];
     let cancelled = false;
     let schemaChanged = false;
+    let catalog: Promise<Catalog | undefined> | undefined; // fetched at most once per run, and only if a result has columns
 
     for (let i = 0; i < statements.length; i++) {
       if (opts.signal?.aborted) {
@@ -59,7 +61,10 @@ export class QueryService {
         results.push({
           index: i,
           sql: text,
-          columns: raw.columns,
+          // what the catalog knows about the columns the result is read from; a slow catalog is not waited for
+          columns: raw.columns.length
+            ? enrichColumns(raw.columns, text, await (catalog ??= this.deps.schema.catalogSoon(connectionId)), tokenizerOptions(descriptor.dialect))
+            : raw.columns,
           rows: raw.rows.map((r) => r.map(toCell)),
           truncated: !!raw.truncated,
           affectedRows: raw.affectedRows,

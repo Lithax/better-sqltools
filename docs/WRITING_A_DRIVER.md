@@ -159,6 +159,23 @@ and come alive when the driver appears.
 pasted into generated SQL. `id` must be unique within the connection. `data` is yours: it is handed back to you untouched
 in later `children()` and `ddl()` calls.
 
+## Describing columns
+
+Results, completion and editing all lean on what the driver knows about columns. All of it is optional: leave out what you
+do not know, and never invent it.
+
+* In `catalog()` a column can carry `type` (as the database spells it), `kind`, `primaryKey`, `nullable`, `unique` (on its
+  own, not as part of a composite constraint), `autoIncrement` (the database fills it in), `defaultValue` (as the
+  database prints it) and `foreignKey` (`{ table, column?, schema? }`).
+* `kind` is yours to decide: `integer`, `decimal`, `text`, `boolean`, `datetime`, `binary`, `json` or `other`. It drives
+  alignment and colour in the results grid. The core never guesses it from a type name, because only the driver knows that
+  its `NUMBER(10,2)` is a decimal and its `TINYINT(1)` a boolean.
+* A column in the result of `execute()` can carry the same facts, plus `source: { schema?, table, column }` when your
+  protocol says where a result column comes from (most server databases do). The core uses that as it is.
+* Without a `source`, the core works it out for a plain single-table `SELECT` from the SQL and your catalog, and leaves
+  everything else (expressions, aggregates, subqueries) without extra facts. A driver that only implements `catalog()`
+  therefore already gets typed, constraint-aware results for simple queries.
+
 ## Capabilities
 
 `capabilities` is advisory today (shown in the Drivers view). Implementing the optional methods is what enables the

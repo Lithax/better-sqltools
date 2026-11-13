@@ -1,11 +1,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import initSqlJs, { type Database, type SqlJsStatic, type SqlValue } from 'sql.js';
-import type { Catalog, CatalogTable, DriverInspection, InspectItem, SchemaNode } from '../../../src/api';
+import type { Catalog, CatalogColumn, CatalogTable, DriverInspection, ForeignKeyRef, InspectItem, SchemaNode } from '../../../src/api';
 import type {
   ChildrenOptions, Driver, DriverConfig, DriverEnvironment, DriverFactory, ExecutionContext, RawStatementResult,
 } from '../../../src/api';
 import { sqliteDescriptor } from './descriptor';
+import { sqliteKind } from './types';
 
 /**
  * sql.js keeps the whole database in memory. This driver loads the file on open and writes
@@ -177,17 +178,50 @@ class SqliteDriver implements Driver {
 
   async catalog(): Promise<Catalog> {
     const rows = this.all(
-      `SELECT m.name AS t, m.type AS k, p.name AS c, p.type AS ty, p."notnull" AS nn, p.pk AS pk
+      `SELECT m.name AS t, m.type AS k, m.sql AS ddl, p.name AS c, p.type AS ty, p."notnull" AS nn, p.pk AS pk, p.dflt_value AS dv
          FROM sqlite_master m JOIN pragma_table_info(m.name) p
         WHERE m.type IN ('table','view') AND m.name NOT LIKE 'sqlite_%'
         ORDER BY m.name, p.cid`,
     );
+    const keyOf = (table: SqlValue, column: SqlValue) => `${table}\u0000${column}`;
+    // columns that are unique on their own: a single-column unique constraint or index (the primary key is not repeated here)
+    const unique = new Set(
+      this.all(
+        `SELECT m.name AS t, ii.name AS c
+           FROM sqlite_master m JOIN pragma_index_list(m.name) il JOIN pragma_index_info(il.name) ii
+          WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%'
+            AND il."unique" = 1 AND il.partial = 0 AND il.origin <> 'pk'
+            AND (SELECT count(*) FROM pragma_index_info(il.name)) = 1`,
+      ).map((r) => keyOf(r.t, r.c)),
+    );
+    const references = new Map<string, ForeignKeyRef>(
+      this.all(
+        `SELECT m.name AS t, fk."from" AS c, fk."table" AS rt, fk."to" AS rc
+           FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) fk
+          WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%'`,
+      ).map((r): [string, ForeignKeyRef] => [keyOf(r.t, r.c), { table: String(r.rt), ...(r.rc ? { column: String(r.rc) } : {}) }]),
+    );
+    const primaryKeyColumns = new Map<string, number>();
+    for (const r of rows) if (Number(r.pk) > 0) primaryKeyColumns.set(String(r.t), (primaryKeyColumns.get(String(r.t)) ?? 0) + 1);
+
     const tables = new Map<string, CatalogTable>();
     for (const r of rows) {
       const name = String(r.t);
+      const isTable = r.k !== 'view';
       let t = tables.get(name);
-      if (!t) tables.set(name, (t = { name, qualifiedName: quoteIdent(name), kind: r.k === 'view' ? 'view' : 'table', columns: [] }));
-      t.columns.push({ name: String(r.c), type: r.ty ? String(r.ty) : undefined, primaryKey: Number(r.pk) > 0, nullable: !Number(r.nn) });
+      if (!t) tables.set(name, (t = { name, qualifiedName: quoteIdent(name), kind: isTable ? 'table' : 'view', columns: [] }));
+      const type = r.ty ? String(r.ty) : undefined;
+      const primaryKey = Number(r.pk) > 0;
+      // a lone INTEGER PRIMARY KEY of a rowid table is the rowid itself: SQLite fills it in and refuses NULL
+      const rowidAlias = isTable && primaryKey && primaryKeyColumns.get(name) === 1 && type?.toUpperCase() === 'INTEGER' && !/\)\s*without\s+rowid\b/i.test(String(r.ddl ?? ''));
+      const key = keyOf(r.t, r.c);
+      const column: CatalogColumn = { name: String(r.c), type, kind: sqliteKind(type), primaryKey, nullable: !Number(r.nn) && !rowidAlias };
+      if (unique.has(key)) column.unique = true;
+      if (rowidAlias) column.autoIncrement = true;
+      if (r.dv !== null && r.dv !== undefined) column.defaultValue = String(r.dv);
+      const foreignKey = references.get(key);
+      if (foreignKey) column.foreignKey = foreignKey;
+      t.columns.push(column);
     }
     // Empty tables/views have no pragma rows; list them anyway.
     for (const r of this.all("SELECT name, type FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'")) {

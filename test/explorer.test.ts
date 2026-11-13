@@ -162,6 +162,25 @@ test('search: finds tables and columns across the connection and acts on the pic
   assert.equal(state.clipboard, 'books.title');
 });
 
+test('results: columns arrive with the types and constraints SQLite reports for the table they come from', async () => {
+  const lastResult = () => [...state.resultsMessages].reverse().find((m) => m.type === 'state' && m.state.status === 'done')?.state.result;
+  await mock.openSql('select b.id, b.title, b.year as published, count(*) as n from books b|;');
+  state.resultsMessages.length = 0;
+  await run('runStatement');
+  const [r] = (await waitFor(lastResult)).statements;
+  assert.deepEqual(r.columns, [
+    { name: 'id', type: 'INTEGER', kind: 'integer', notNull: true, primaryKey: true, autoIncrement: true, source: { table: 'books', column: 'id' } },
+    { name: 'title', type: 'TEXT', kind: 'text', notNull: true, source: { table: 'books', column: 'title' } },
+    { name: 'published', type: 'INTEGER', kind: 'integer', notNull: false, source: { table: 'books', column: 'year' } },
+    { name: 'n' },
+  ], 'renamed columns are traced to the table; the aggregate stays plain');
+
+  await mock.openSql('select * from authors|;');
+  state.resultsMessages.length = 0;
+  await run('runStatement');
+  assert.deepEqual((await waitFor(lastResult)).statements[0].columns.map((c: any) => c.name + ':' + c.source?.table), ['id:authors', 'name:authors']);
+});
+
 test('inspect: uptime, what the core measured and what the driver reports', async () => {
   await run('inspectConnection', await connection());
   const panel = state.panels.filter((p) => p.type === 'betterSqlTools.inspect').at(-1)!;

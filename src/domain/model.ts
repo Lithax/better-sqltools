@@ -27,9 +27,45 @@ export interface CellBlob {
 /** Everything a result cell can be once it crossed the driver boundary. JSON-safe. */
 export type Cell = null | string | number | boolean | CellBlob;
 
+/**
+ * How a driver says the values of a column should be treated (aligned, coloured, validated). It is the driver's call:
+ * only it knows that its `NUMBER(10,2)` is a decimal and its `TINYINT(1)` a boolean.
+ */
+export type ColumnKind = 'integer' | 'decimal' | 'text' | 'boolean' | 'datetime' | 'binary' | 'json' | 'other';
+
+/** What a foreign key column points at. */
+export interface ForeignKeyRef {
+  schema?: string;
+  table: string;
+  column?: string;
+}
+
+/** The table column a result column is read from. */
+export interface ColumnSource {
+  schema?: string;
+  table: string;
+  column: string;
+}
+
+/**
+ * A result column. Only `name` is certain; everything else is what the driver (or the catalog, for columns that map
+ * straight to a table column) knows, so any of it may be missing.
+ */
 export interface Column {
   name: string;
+  /** The type as the database spells it: `VARCHAR(30)`, `INTEGER`... */
   type?: string;
+  kind?: ColumnKind;
+  notNull?: boolean;
+  primaryKey?: boolean;
+  unique?: boolean;
+  /** The database fills the value in when it is left out (identity, serial, rowid alias...). */
+  autoIncrement?: boolean;
+  /** The default as the database prints it. */
+  defaultValue?: string;
+  foreignKey?: ForeignKeyRef;
+  /** Set when the column is known to be read straight from a table column. */
+  source?: ColumnSource;
 }
 
 export interface QueryError {
@@ -99,8 +135,14 @@ export interface SchemaNode {
 export interface CatalogColumn {
   name: string;
   type?: string;
+  kind?: ColumnKind;
   primaryKey?: boolean;
   nullable?: boolean;
+  /** Unique on its own (a single-column unique constraint or index), not as part of a composite one. */
+  unique?: boolean;
+  autoIncrement?: boolean;
+  defaultValue?: string;
+  foreignKey?: ForeignKeyRef;
 }
 export interface CatalogTable {
   schema?: string;

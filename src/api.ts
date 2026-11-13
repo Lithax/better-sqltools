@@ -19,7 +19,8 @@ export type {
   ConnectionField, DialectInfo, DriverCapabilities, DriverDescriptor, DriverIcon, FieldType,
 } from './domain/driver-descriptor';
 export type {
-  Catalog, CatalogColumn, CatalogTable, Column, DriverInspection, HealthStatus, InspectItem, InspectSection, NodeKind, SchemaNode,
+  Catalog, CatalogColumn, CatalogTable, Column, ColumnKind, ColumnSource, DriverInspection, ForeignKeyRef, HealthStatus, InspectItem,
+  InspectSection, NodeKind, SchemaNode,
 } from './domain/model';
 
 export interface BetterSqlToolsApi {

@@ -103,3 +103,11 @@ export function tokenize(sql: string, o: TokenizerOptions = {}): Token[] {
   }
   return out;
 }
+
+/** The name inside a quoted identifier (`"a""b"`, `` `x` ``, `[x]`); anything else comes back unchanged. */
+export function unquoteIdentifier(text: string): string {
+  const f = text[0];
+  if (f === '"' || f === '`') return text.slice(1, text.endsWith(f) && text.length > 1 ? -1 : undefined).replace(new RegExp(f + f, 'g'), f);
+  if (f === '[') return text.slice(1, text.endsWith(']') ? -1 : undefined);
+  return text;
+}
