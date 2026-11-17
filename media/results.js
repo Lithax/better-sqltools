@@ -1,20 +1,25 @@
 (function () {
   'use strict';
 
+  const core = window.BstResults;
   const vscode = acquireVsCodeApi();
   const root = document.getElementById('root');
 
-  const ROW_H = 24;
-  const HEADER_H = 26;
+  const ROW_H = 26;
+  const HEAD_H = 32;
   const BUFFER = 10;
-  const ROWNUM_CH = 7;
-  const MAX_TEXT = 500;
+  const MIN_W = 40;
+  const SAMPLE_ROWS = 300;
   const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl';
+  const fmtInt = core.fmtInt;
 
+  let settings = { columnFit: 'fitNameAndValue', showTypes: true, colorByType: true };
   let state = { status: 'idle' };
   let tab = 0;
   let timer = null;
-  const views = new Map(); // statement index -> { sort, filter, selected }
+  let exportFormat = 'csv';
+  let openPop = null; // the popover that is open, if any
+  const views = new Map(); // statement index -> { sort, selected, widths, manual }
 
   // ---- tiny DOM helper. Everything goes through textContent: database values are untrusted. ----
   function h(tag, attrs) {
@@ -37,55 +42,36 @@
     return el;
   }
 
-  const fmtInt = (n) => Number(n).toLocaleString();
   const fmtMs = (ms) => (ms < 1 ? '<1 ms' : ms < 1000 ? Math.round(ms) + ' ms' : (ms / 1000).toFixed(2) + ' s');
   const oneLine = (s, n) => {
     const t = String(s).replace(/\s+/g, ' ').trim();
     return t.length > n ? t.slice(0, n - 1) + '\u2026' : t;
   };
-
-  function cellText(v) {
-    if (v === null) return '';
-    if (typeof v === 'object') return '0x' + v.$blob + (v.$blob.length / 2 < v.bytes ? '\u2026' : '');
-    return String(v);
-  }
-
-  function fmt(v) {
-    if (v === null) return { text: 'NULL', cls: 'null', title: 'NULL' };
-    if (typeof v === 'number') return { text: String(v), cls: 'num', title: String(v) };
-    if (typeof v === 'boolean') return { text: String(v), cls: 'bool', title: String(v) };
-    if (typeof v === 'object') {
-      const t = cellText(v);
-      const cut = v.$blob.length / 2 < v.bytes;
-      return {
-        text: cut ? '0x' + v.$blob.slice(0, 32) + '\u2026 (' + fmtInt(v.bytes) + ' B)' : t,
-        cls: 'blob',
-        title: fmtInt(v.bytes) + ' bytes\n' + t,
-      };
-    }
-    const s = String(v);
-    return {
-      text: s.length > MAX_TEXT ? s.slice(0, MAX_TEXT) + '\u2026' : s,
-      cls: 'str',
-      title: s.length > 2000 ? s.slice(0, 2000) + '\u2026' : s,
-    };
-  }
-
-  function compare(a, b) {
-    if (typeof a === 'number' && typeof b === 'number') return a - b;
-    return cellText(a).localeCompare(cellText(b), undefined, { numeric: true, sensitivity: 'base' });
-  }
+  const icon = (name) => h('span', { class: 'codicon codicon-' + name, 'aria-hidden': 'true' });
+  const iconButton = (name, label, onclick, extra) => h('button', Object.assign({ class: 'iconbtn', type: 'button', title: label, 'aria-label': label, onclick: onclick }, extra || {}), icon(name));
 
   function viewOf(index) {
     let v = views.get(index);
-    if (!v) views.set(index, (v = { sort: null, filter: '', selected: null }));
+    if (!v) views.set(index, (v = { sort: null, selected: null, widths: null, manual: false, filters: new Map() }));
     return v;
   }
 
   // ---- messages ----
   window.addEventListener('message', (e) => {
     const m = e.data;
-    if (!m || m.type !== 'state') return;
+    if (!m) return;
+    if (m.type === 'settings') {
+      const fitChanged = m.settings.columnFit !== settings.columnFit;
+      const typesChanged = m.settings.showTypes !== settings.showTypes;
+      settings = Object.assign({}, settings, m.settings);
+      document.body.classList.toggle('typed', !!settings.colorByType);
+      // a new mode sizes everything again; showing or hiding type labels changes what a header needs, which a hand-sized column should not undo
+      if (fitChanged) views.forEach((v) => { v.widths = null; v.manual = false; });
+      else if (typesChanged) views.forEach((v) => { if (!v.manual) v.widths = null; });
+      render();
+      return;
+    }
+    if (m.type !== 'state') return;
     const prev = state;
     state = m.state;
     if (state.status === 'done') {
@@ -97,6 +83,7 @@
     }
     render();
   });
+  document.body.classList.toggle('typed', !!settings.colorByType);
   render(); // show the idle state right away; the extension replies to `ready` with the real one
   vscode.postMessage({ type: 'ready' });
 
@@ -108,8 +95,190 @@
     return Math.max(0, list.length - 1);
   }
 
+  // ---- popovers: the export dialog and the column-width menu ----
+  function closePopover(refocus) {
+    if (!openPop) return;
+    const p = openPop;
+    openPop = null;
+    p.off();
+    p.pop.remove();
+    p.anchor.setAttribute('aria-expanded', 'false');
+    if (refocus) p.anchor.focus();
+  }
+
+  function popover(anchor, label, content) {
+    closePopover(false);
+    const pop = h('div', { class: 'popover', role: 'dialog', 'aria-label': label }, ...content);
+    pop.style.visibility = 'hidden';
+    document.body.append(pop);
+    const r = anchor.getBoundingClientRect();
+    const w = pop.offsetWidth;
+    const ph = pop.offsetHeight;
+    const left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8));
+    const below = r.bottom + 4;
+    pop.style.left = left + 'px';
+    pop.style.top = (below + ph > window.innerHeight - 8 ? Math.max(8, r.top - ph - 4) : below) + 'px';
+    pop.style.visibility = '';
+
+    const onDown = (e) => { if (!pop.contains(e.target) && !anchor.contains(e.target)) closePopover(false); };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePopover(true); return; }
+      if (e.key === 'Tab') { // keep focus in the popover
+        const items = [...pop.querySelectorAll('button, input')].filter((x) => !x.disabled);
+        if (!items.length) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    document.addEventListener('mousedown', onDown, true);
+    document.addEventListener('keydown', onKey, true);
+    anchor.setAttribute('aria-expanded', 'true');
+    openPop = { pop: pop, anchor: anchor, off: () => { document.removeEventListener('mousedown', onDown, true); document.removeEventListener('keydown', onKey, true); } };
+    return pop;
+  }
+
+  const FIT_LABELS = {
+    fitAll: ['Fit all columns to the panel', 'Equal widths, whatever the names and values are'],
+    fitName: ['Fit column names', 'As wide as each name and type'],
+    fitNameAndValue: ['Fit names and values', 'Wide enough for both, up to a limit'],
+  };
+
+  function fitMenu(anchor, grid) {
+    const items = core.FIT_MODES.map((mode) =>
+      h('button', {
+        class: 'menuitem', type: 'button', role: 'menuitemradio', 'aria-checked': mode === settings.columnFit ? 'true' : 'false',
+        onclick: () => {
+          closePopover(true);
+          if (mode === settings.columnFit) { grid.fit(); return; }
+          settings.columnFit = mode;
+          views.forEach((v) => { v.widths = null; v.manual = false; });
+          vscode.postMessage({ type: 'setColumnFit', mode: mode }); // the setting is the one source of truth
+          grid.fit();
+        },
+      }, h('span', { class: 'tick' }, mode === settings.columnFit ? icon('check') : null),
+      h('span', null, FIT_LABELS[mode][0], h('span', { class: 'desc' }, FIT_LABELS[mode][1]))));
+    const pop = popover(anchor, 'Column widths', [h('h2', null, 'Column widths'), h('div', { class: 'sub' }, 'Drag a column border to size one by hand; double-click it to fit that column.'), ...items]);
+    const checked = pop.querySelector('[aria-checked="true"]') || pop.querySelector('button');
+    if (checked) checked.focus();
+  }
+
+  function exportDialog(anchor, s, grid, say) {
+    const n = grid.count();
+    const rows = n === 1 ? '1 row' : fmtInt(n) + ' rows';
+    const radios = [['csv', 'CSV'], ['json', 'JSON']].map((f) =>
+      h('label', { class: 'opt' },
+        h('input', { type: 'radio', name: 'format', value: f[0], checked: exportFormat === f[0], onchange: () => { exportFormat = f[0]; } }), f[1]));
+    const send = (action) => {
+      closePopover(true);
+      vscode.postMessage({ type: 'export', format: exportFormat, action: action, index: s.index, rows: grid.order() });
+      if (action === 'copy') say('Copied');
+    };
+    const pop = popover(anchor, 'Export rows', [
+      h('h2', null, 'Export rows'),
+      h('div', { class: 'sub' }, rows + ', as shown'),
+      h('fieldset', null, h('legend', { class: 'sr' }, 'Format'), ...radios),
+      h('div', { class: 'actions' },
+        h('button', { type: 'button', onclick: () => closePopover(true) }, 'Cancel'),
+        h('button', { type: 'button', onclick: () => send('copy') }, 'Copy'),
+        h('button', { type: 'button', class: 'primary', onclick: () => send('save') }, 'Save as\u2026')),
+    ]);
+    const checked = pop.querySelector('input:checked');
+    if (checked) checked.focus();
+  }
+
+  /**
+   * The filter dialog of one column: its distinct values with counts, to tick. Typing keeps only the values that match.
+   * What is unticked is what the column hides; ticking everything removes the filter.
+   */
+  function filterDialog(anchor, grid, col, name) {
+    const MAX_SHOWN = 200;
+    const list = grid.candidates(col);
+    const had = grid.hidden(col);
+    let hidden = new Set(had || []);
+    let saved = null; // the selection from before a search began, back when the search is cleared
+    let query = '';
+
+    const matches = () => core.searchValues(list, query);
+    const search = h('input', {
+      type: 'search', class: 'search', placeholder: 'Type to keep only matching values', 'aria-label': 'Search values', autocomplete: 'off', spellcheck: 'false',
+      oninput: () => {
+        if (!query.trim() && search.value.trim()) saved = new Set(hidden);
+        query = search.value;
+        if (query.trim()) {
+          const keep = new Set(matches().map((e) => e.key));
+          hidden = new Set(list.filter((e) => !keep.has(e.key)).map((e) => e.key));
+        } else if (saved) {
+          hidden = saved;
+          saved = null;
+        }
+        draw();
+      },
+    });
+    const all = h('input', {
+      type: 'checkbox', class: 'selectall',
+      onchange: () => {
+        matches().forEach((e) => { if (all.checked) hidden.delete(e.key); else hidden.add(e.key); });
+        draw();
+      },
+    });
+    const allCount = h('span', { class: 'vcount' });
+    const vlist = h('div', { class: 'vlist', role: 'group', 'aria-label': 'Values' });
+    const more = h('div', { class: 'sub more' });
+    const clear = h('button', { type: 'button', disabled: !(had && had.size), onclick: () => finish(null) }, 'Clear filter');
+    const apply = h('button', { type: 'button', class: 'primary', onclick: () => finish(hidden) }, 'Apply');
+
+    function finish(next) {
+      const hides = next && list.some((e) => next.has(e.key));
+      closePopover(false);
+      grid.setFilter(col, hides ? next : null);
+      grid.focusFilter(col);
+    }
+
+    function syncAll() {
+      const m = matches();
+      const kept = m.filter((e) => !hidden.has(e.key)).length;
+      all.checked = m.length > 0 && kept === m.length;
+      all.indeterminate = kept > 0 && kept < m.length;
+      all.disabled = !m.length;
+      allCount.textContent = fmtInt(kept) + ' of ' + fmtInt(m.length);
+      apply.disabled = !list.some((e) => !hidden.has(e.key)); // keeping nothing is not a filter, it is an empty grid
+    }
+
+    function draw() {
+      const m = matches();
+      vlist.replaceChildren(...m.slice(0, MAX_SHOWN).map((e) => {
+        const cb = h('input', {
+          type: 'checkbox', checked: !hidden.has(e.key),
+          onchange: () => { if (cb.checked) hidden.delete(e.key); else hidden.add(e.key); syncAll(); },
+        });
+        const text = e.key === null ? 'NULL' : core.describe(e.value).text;
+        return h('label', { class: 'vopt', title: e.key === null ? 'NULL' : core.describe(e.value).title },
+          cb, h('span', { class: 'vtext' + (e.key === null ? ' null' : '') }, text), h('span', { class: 'vcount' }, fmtInt(e.count)));
+      }));
+      more.textContent = !m.length ? 'No values match.' : m.length > MAX_SHOWN ? 'Showing the first ' + MAX_SHOWN + ' of ' + fmtInt(m.length) + ' values. Type to narrow the list.' : '';
+      syncAll();
+    }
+
+    const n = list.length;
+    const pop = popover(anchor, 'Filter ' + name, [
+      h('h2', null, 'Filter ', h('span', { class: 'colname' }, name)),
+      h('div', { class: 'sub' }, fmtInt(n) + (n === 1 ? ' value' : ' values') + (grid.otherFilters(col) ? ', in the rows the other filters leave' : '')),
+      search,
+      h('div', { class: 'vbox' }, h('label', { class: 'vopt all' }, all, h('span', { class: 'vtext' }, '(Select all)'), allCount), vlist),
+      more,
+      h('div', { class: 'actions' }, clear, h('button', { type: 'button', onclick: () => closePopover(true) }, 'Cancel'), apply),
+    ]);
+    pop.classList.add('filterpop');
+    pop.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === search && !apply.disabled) { e.preventDefault(); apply.click(); } });
+    draw();
+    search.focus();
+  }
+
   // ---- views ----
   function render() {
+    closePopover(false);
     if (timer) {
       clearInterval(timer);
       timer = null;
@@ -146,16 +315,17 @@
     const parts = [r.connectionName, r.driverName, count === 1 ? '1 statement' : fmtInt(count) + ' statements', fmtMs(r.durationMs)];
     if (r.cancelled) parts.push('cancelled');
     if (r.omitted) parts.push(fmtInt(r.omitted) + ' quiet results not shown');
-    wrap.append(h('div', { class: 'summary' }, parts.join(' \u00b7 ')));
+    const summary = parts.join(' \u00b7 ');
 
     if (!r.statements.length) {
-      wrap.append(h('div', { class: 'empty' }, h('strong', null, r.cancelled ? 'Cancelled' : 'Nothing to run'),
-        r.cancelled ? 'The run was cancelled before the first statement.' : 'The editor has no SQL statements.'));
+      wrap.append(h('div', { class: 'summary' }, summary),
+        h('div', { class: 'empty' }, h('strong', null, r.cancelled ? 'Cancelled' : 'Nothing to run'),
+          r.cancelled ? 'The run was cancelled before the first statement.' : 'The editor has no SQL statements.'));
       return wrap;
     }
     if (r.statements.length > 1) wrap.append(tabsView(r));
     const s = r.statements[Math.min(tab, r.statements.length - 1)];
-    wrap.append(statementView(s));
+    wrap.append(statementView(s, summary));
     return wrap;
   }
 
@@ -171,17 +341,17 @@
         }, (i + 1) + '  ' + oneLine(s.sql, 32))));
   }
 
-  function statementView(s) {
+  function statementView(s, summary) {
     const panel = h('div', { class: 'panel' });
     if (s.error) {
-      panel.append(h('div', { class: 'msg' },
+      panel.append(h('div', { class: 'summary' }, summary), h('div', { class: 'msg' },
         h('div', { class: 'errorbox', role: 'alert' }, s.error.message + (s.error.code ? '\n(' + s.error.code + ')' : '')),
         h('div', { class: 'sql' }, s.sql)));
       return panel;
     }
     if (!s.columns.length) {
       const n = s.affectedRows;
-      panel.append(h('div', { class: 'msg' },
+      panel.append(h('div', { class: 'summary' }, summary), h('div', { class: 'msg' },
         h('div', { class: 'okbox' }, n === undefined ? 'Statement executed' : n === 1 ? '1 row affected' : fmtInt(n) + ' rows affected', ' \u00b7 ' + fmtMs(s.durationMs)),
         (s.notices || []).map((t) => h('div', { class: 'sql' }, t)),
         h('div', { class: 'sql' }, s.sql)));
@@ -193,88 +363,215 @@
     const shown = h('span', { class: 'muted' });
     const toast = h('span', { class: 'toast', role: 'status' });
     const say = (t) => { toast.textContent = t; setTimeout(() => { if (toast.textContent === t) toast.textContent = ''; }, 1500); };
-    grid.onCount((n) => { shown.textContent = n === s.rows.length ? '' : fmtInt(n) + ' of ' + fmtInt(s.rows.length) + ' rows match'; });
+
+    const fitBtn = iconButton('arrow-both', 'Column widths', () => fitMenu(fitBtn, grid), { 'aria-haspopup': 'dialog', 'aria-expanded': 'false' });
+    const clearBtn = iconButton('clear-all', 'Clear all filters', () => grid.clearFilters());
+    const copyBtn = iconButton('copy', 'Copy the rows shown, tab-separated', () => {
+      vscode.postMessage({ type: 'export', format: 'tsv', action: 'copy', index: s.index, rows: grid.order() });
+      say('Copied');
+    });
+    const exportBtn = iconButton('export', 'Export the rows shown\u2026', () => exportDialog(exportBtn, s, grid, say), { 'aria-haspopup': 'dialog', 'aria-expanded': 'false' });
+
+    const toolbar = h('div', { class: 'toolbar' }, h('span', { class: 'runinfo', title: summary }, summary), shown, h('span', { class: 'spacer' }), toast, fitBtn, copyBtn, exportBtn);
+    // what the filters leave is said in words, and the way back to everything is offered only while a filter is on
+    grid.onCount((n) => {
+      shown.textContent = n === s.rows.length ? '' : fmtInt(n) + ' of ' + fmtInt(s.rows.length) + ' rows match';
+      if (grid.filtered()) { if (!clearBtn.isConnected) toolbar.insertBefore(clearBtn, fitBtn); } else clearBtn.remove();
+    });
 
     panel.append(
-      h('div', { class: 'toolbar' },
-        h('input', {
-          class: 'filter', type: 'search', placeholder: 'Filter rows', 'aria-label': 'Filter rows', value: vs.filter,
-          oninput: (e) => { vs.filter = e.target.value; grid.refresh(); },
-        }),
-        shown,
-        h('span', { class: 'spacer' }),
-        toast,
-        h('button', { class: 'ghost', title: 'Copy the rows shown, tab-separated', onclick: () => { vscode.postMessage({ type: 'copy', text: grid.tsv() }); say('Copied'); } }, 'Copy'),
-        h('button', { class: 'ghost', title: 'Save the loaded rows as CSV', onclick: () => vscode.postMessage({ type: 'export', format: 'csv', index: s.index }) }, 'Export CSV'),
-        h('button', { class: 'ghost', title: 'Save the loaded rows as JSON', onclick: () => vscode.postMessage({ type: 'export', format: 'json', index: s.index }) }, 'Export JSON')),
+      toolbar,
       grid.el,
       h('div', { class: 'footer' },
         fmtInt(s.rows.length) + (s.rows.length === 1 ? ' row' : ' rows') + ' \u00b7 ' + fmtMs(s.durationMs),
         s.truncated ? h('span', { class: 'warn' }, ' \u00b7 stopped at the row limit (betterSqlTools.results.maxRows)') : null));
 
-    grid.copyCell = (text) => { vscode.postMessage({ type: 'copy', text }); say('Copied'); };
+    grid.copyCell = (text) => { vscode.postMessage({ type: 'copy', text: text }); say('Copied'); };
     return panel;
   }
 
-  // ---- virtualised grid ----
+  // ---- measuring text, to fit columns ----
+  // (jsdom has no canvas; estimating there keeps the page testable)
+  const measureCtx = /jsdom/i.test(navigator.userAgent) ? null : document.createElement('canvas').getContext('2d');
+  function textWidth(text, font) {
+    if (!measureCtx) return String(text).length * 7.5;
+    measureCtx.font = font;
+    return measureCtx.measureText(text).width;
+  }
+  function fonts() {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (name, fallback) => cs.getPropertyValue(name).trim() || fallback;
+    const uiSize = v('--vscode-font-size', '13px');
+    const uiFamily = v('--vscode-font-family', 'sans-serif');
+    const px = parseFloat(uiSize) || 13;
+    return {
+      cell: v('--vscode-editor-font-weight', 'normal') + ' ' + v('--vscode-editor-font-size', '13px') + ' ' + v('--vscode-editor-font-family', 'monospace'),
+      head: '600 ' + uiSize + ' ' + uiFamily,
+      type: Math.max(9, px * 0.85) + 'px ' + uiFamily,
+      pill: '700 ' + Math.max(8, px * 0.72) + 'px ' + uiFamily,
+    };
+  }
+  const nextFrame = (fn) => (window.requestAnimationFrame || ((f) => setTimeout(f, 16)))(fn);
+
+  // ---- the grid: virtualised rows, columns sized in pixels ----
   function createGrid(s, vs) {
     const cols = s.columns;
     const rows = s.rows;
-    const widths = cols.map((c, i) => {
-      let w = c.name.length + 4;
-      for (let r = 0, n = Math.min(rows.length, 200); r < n; r++) {
-        const v = rows[r][i];
-        const len = v === null ? 4 : typeof v === 'object' ? 20 : String(v).length;
-        if (len > w) w = len;
-      }
-      return Math.max(8, Math.min(48, w)) + 2;
-    });
-    const total = widths.reduce((a, b) => a + b, ROWNUM_CH);
+    const kinds = cols.map((c, i) => core.columnKind(c, rows, i));
+    const facts = cols.map((c) => core.columnFacts(c));
+    const rowNumWidth = () => Math.max(44, Math.ceil(textWidth(String(rows.length), fonts().cell)) + 24);
+    let rowNumW = rowNumWidth();
 
     const header = h('div', { class: 'grow ghead' });
     const body = h('div', { class: 'gbody' });
-    const inner = h('div', { class: 'grid-inner', style: { width: total + 'ch' } }, header, body);
+    const inner = h('div', { class: 'grid-inner' }, header, body);
     const el = h('div', { class: 'grid', tabindex: '0', role: 'grid', 'aria-rowcount': String(rows.length + 1) }, inner);
 
-    let order = [];
-    let lower = null; // lazily built per-row haystack for the filter
+    let order = rows.map((_, i) => i); // row indexes in the order they are shown
+    let headerCells = [];
     let countCb = null;
-    const api = { el, copyCell: null };
+    let lastClientWidth = 0;
+    const api = { el: el, copyCell: null };
+    const totalWidth = () => rowNumW + vs.widths.reduce((a, b) => a + b, 0);
+
+    /** What each column needs: for its header, and for the widest of the first rows' values. */
+    function measure() {
+      const f = fonts();
+      const head = cols.map((c, i) => {
+        let w = 24 + textWidth(c.name, f.head) + 18 + 8 + 24; // padding, the sort arrow, the resize handle, the filter button
+        if (settings.showTypes && c.type) w += textWidth(c.type, f.type) + 6;
+        facts[i].pills.forEach((p) => { w += textWidth(p.text, f.pill) + 16; });
+        return w;
+      });
+      const vals = cols.map((_, i) => {
+        let widest = 0;
+        for (let r = 0, n = Math.min(rows.length, SAMPLE_ROWS); r < n; r++) widest = Math.max(widest, textWidth(core.describe(rows[r][i]).text, f.cell));
+        return widest + 24;
+      });
+      return { head: head, vals: vals };
+    }
+
+    /** Sizes every column by the current mode. */
+    function fit() {
+      rowNumW = rowNumWidth();
+      const m = measure();
+      const known = el.clientWidth; // 0 until the grid is on screen; fit-all is corrected once it is
+      vs.widths = core.fitWidths({ mode: settings.columnFit, headerPx: m.head, valuePx: m.vals, available: known ? known - rowNumW : 800 });
+      vs.manual = false;
+      layout();
+    }
+
+    function fitColumn(i) {
+      const m = measure();
+      vs.widths[i] = core.fitWidths({ mode: 'fitNameAndValue', headerPx: [m.head[i]], valuePx: [m.vals[i]] })[0];
+      vs.manual = true;
+      layout();
+    }
+
+    function layout() {
+      inner.style.width = totalWidth() + 'px';
+      buildHeader();
+      paint();
+    }
+
+    function setWidth(i, w) {
+      vs.widths[i] = Math.max(MIN_W, Math.round(w));
+      vs.manual = true;
+      headerCells[i].style.width = vs.widths[i] + 'px';
+      inner.style.width = totalWidth() + 'px';
+      schedulePaint();
+    }
+
+    let painting = 0;
+    function schedulePaint() {
+      if (!painting) painting = nextFrame(() => { painting = 0; paint(); });
+    }
+
+    function startResize(e, i, handle) {
+      if (e.button !== undefined && e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startW = vs.widths[i];
+      handle.classList.add('active');
+      if (handle.setPointerCapture && e.pointerId !== undefined) handle.setPointerCapture(e.pointerId);
+      const move = (ev) => setWidth(i, startW + (ev.clientX - startX));
+      const up = () => {
+        handle.classList.remove('active');
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', up);
+        handle.removeEventListener('pointercancel', up);
+      };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', up);
+      handle.addEventListener('pointercancel', up);
+    }
 
     function buildHeader() {
-      header.replaceChildren(h('div', { class: 'cell rownum', style: { width: ROWNUM_CH + 'ch' } }, '#'));
+      header.replaceChildren(h('div', { class: 'cell rownum', style: { width: rowNumW + 'px' } }, '#'));
+      headerCells = [];
       cols.forEach((c, i) => {
         const dir = vs.sort && vs.sort.col === i ? vs.sort.dir : 0;
-        header.append(
-          h('div', {
-            class: 'cell hcell', role: 'columnheader', style: { width: widths[i] + 'ch' },
-            title: c.name + (c.type ? ' (' + c.type + ')' : '') + '\nClick to sort',
-            'aria-sort': dir === 0 ? 'none' : dir > 0 ? 'ascending' : 'descending',
-            onclick: () => {
-              vs.sort = !vs.sort || vs.sort.col !== i ? { col: i, dir: 1 } : vs.sort.dir === 1 ? { col: i, dir: -1 } : null;
-              refresh();
-            },
-          }, h('span', { class: 'hname' }, c.name), dir ? h('span', { class: 'sort' }, dir > 0 ? '\u25B2' : '\u25BC') : null));
+        const toggleSort = () => {
+          vs.sort = !vs.sort || vs.sort.col !== i ? { col: i, dir: 1 } : vs.sort.dir === 1 ? { col: i, dir: -1 } : null;
+          refresh();
+        };
+        const resizer = h('div', {
+          class: 'resizer', role: 'separator', 'aria-orientation': 'vertical', tabindex: '0',
+          'aria-label': 'Resize column ' + c.name, title: 'Drag to resize. Double-click to fit this column.',
+          onpointerdown: (e) => startResize(e, i, resizer),
+          ondblclick: (e) => { e.stopPropagation(); fitColumn(i); },
+          onclick: (e) => e.stopPropagation(),
+          onkeydown: (e) => {
+            const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+            if (!step) return;
+            e.preventDefault();
+            e.stopPropagation();
+            setWidth(i, vs.widths[i] + step * (e.shiftKey ? 50 : 10));
+          },
+        });
+        const hiddenKeys = vs.filters.get(i);
+        const active = !!(hiddenKeys && hiddenKeys.size);
+        const filterBtn = h('button', {
+          class: 'filterbtn' + (active ? ' on' : ''), type: 'button',
+          'aria-label': 'Filter column ' + c.name + (active ? ', filtered' : ''),
+          title: active ? 'Filtered: ' + fmtInt(hiddenKeys.size) + (hiddenKeys.size === 1 ? ' value' : ' values') + ' hidden. Click to change.' : 'Filter by value (Alt+Down)',
+          'aria-haspopup': 'dialog', 'aria-expanded': 'false',
+          onclick: (e) => { e.stopPropagation(); toggleFilter(i, filterBtn); },
+        }, icon(active ? 'filter-filled' : 'filter'));
+        const cell = h('div', {
+          class: 'cell hcell k-' + kinds[i] + (active ? ' filtered' : ''), role: 'columnheader', tabindex: '0', style: { width: vs.widths[i] + 'px' },
+          title: core.columnTitle(c), 'aria-sort': dir === 0 ? 'none' : dir > 0 ? 'ascending' : 'descending',
+          onclick: toggleSort,
+          onkeydown: (e) => {
+            if (e.target !== cell) return;
+            if (e.altKey && e.key === 'ArrowDown') { e.preventDefault(); toggleFilter(i, filterBtn); }
+            else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSort(); }
+          },
+        },
+        h('span', { class: 'hname' }, c.name),
+        settings.showTypes && c.type ? h('span', { class: 'htype' }, c.type) : null,
+        ...facts[i].pills.map((p) => h('span', { class: 'pill ' + p.text.toLowerCase(), title: p.title }, p.text)),
+        dir ? h('span', { class: 'sort' }, icon(dir > 0 ? 'arrow-up' : 'arrow-down')) : null,
+        filterBtn,
+        resizer);
+        headerCells.push(cell);
+        header.append(cell);
       });
     }
 
+    const allRows = () => rows.map((_, i) => i);
+
+    function toggleFilter(col, anchor) {
+      if (openPop && openPop.anchor === anchor) { closePopover(true); return; }
+      filterDialog(anchor, api, col, cols[col].name);
+    }
+
     function refresh() {
-      const f = vs.filter.trim().toLowerCase();
-      if (f && !lower) lower = rows.map((r) => r.map(cellText).join('\u0001').toLowerCase());
-      order = [];
-      for (let i = 0; i < rows.length; i++) if (!f || lower[i].includes(f)) order.push(i);
-      if (vs.sort) {
-        const col = vs.sort.col;
-        const dir = vs.sort.dir;
-        order.sort((x, y) => {
-          const a = rows[x][col];
-          const b = rows[y][col];
-          if (a === null || b === null) return a === b ? x - y : a === null ? 1 : -1; // NULLs last either way
-          return dir * compare(a, b) || x - y;
-        });
-      }
+      order = core.applyFilters(rows, allRows(), vs.filters);
+      if (vs.sort) order = core.sortOrder(rows, order, vs.sort.col, vs.sort.dir);
       buildHeader();
-      inner.style.height = HEADER_H + order.length * ROW_H + 'px';
+      inner.style.height = HEAD_H + order.length * ROW_H + 'px';
       el.scrollTop = 0;
       paint();
       if (countCb) countCb(order.length);
@@ -283,24 +580,24 @@
     function paint() {
       const top = el.scrollTop;
       const view = el.clientHeight || 400;
-      const first = Math.max(0, Math.floor((top - HEADER_H) / ROW_H) - BUFFER);
+      const first = Math.max(0, Math.floor((top - HEAD_H) / ROW_H) - BUFFER);
       const last = Math.min(order.length, Math.ceil((top + view) / ROW_H) + BUFFER);
-      body.style.transform = 'translateY(' + (HEADER_H + first * ROW_H) + 'px)';
+      body.style.transform = 'translateY(' + (HEAD_H + first * ROW_H) + 'px)';
       const frag = document.createDocumentFragment();
-      for (let k = first; k < last; k++) frag.append(rowEl(order[k], k));
+      for (let k = first; k < last; k++) frag.append(rowEl(order[k]));
       body.replaceChildren(frag);
     }
 
-    function rowEl(ri, k) {
+    function rowEl(ri) {
       const row = rows[ri];
-      const r = h('div', { class: 'grow' + (k % 2 ? ' alt' : ''), role: 'row' },
-        h('div', { class: 'cell rownum', style: { width: ROWNUM_CH + 'ch' } }, String(ri + 1)));
+      const r = h('div', { class: 'grow', role: 'row' }, h('div', { class: 'cell rownum', style: { width: rowNumW + 'px' } }, String(ri + 1)));
       for (let c = 0; c < cols.length; c++) {
-        const f = fmt(row[c]);
+        const f = core.describe(row[c]);
+        const col = cols[c];
         const selected = vs.selected && vs.selected.row === ri && vs.selected.col === c;
         r.append(h('div', {
-          class: 'cell ' + f.cls + (selected ? ' sel' : ''), role: 'gridcell', style: { width: widths[c] + 'ch' },
-          title: f.title, 'data-r': String(ri), 'data-c': String(c),
+          class: 'cell ' + f.cls + ' k-' + kinds[c] + (col.primaryKey ? ' c-pk' : '') + (col.foreignKey ? ' c-fk' : '') + (selected ? ' sel' : ''),
+          role: 'gridcell', style: { width: vs.widths[c] + 'px' }, title: f.title, 'data-r': String(ri), 'data-c': String(c),
         }, f.text));
       }
       return r;
@@ -308,9 +605,18 @@
 
     let raf = 0;
     el.addEventListener('scroll', () => {
-      if (!raf) raf = requestAnimationFrame(() => { raf = 0; paint(); });
+      if (!raf) raf = nextFrame(() => { raf = 0; paint(); });
     });
-    new ResizeObserver(() => paint()).observe(el);
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(() => {
+        const w = el.clientWidth;
+        if (w && w !== lastClientWidth) {
+          lastClientWidth = w;
+          if (settings.columnFit === 'fitAll' && !vs.manual) { fit(); return; }
+        }
+        paint();
+      }).observe(el);
+    }
 
     el.addEventListener('click', (e) => {
       const cell = e.target.closest ? e.target.closest('.cell[data-r]') : null;
@@ -318,21 +624,63 @@
       vs.selected = { row: Number(cell.dataset.r), col: Number(cell.dataset.c) };
       paint();
     });
+
+    /** Moves the selected cell, keeping it in view. */
+    function moveSelection(dr, dc) {
+      if (!order.length) return;
+      let k;
+      let c;
+      if (!vs.selected) { // the first key press selects the first cell rather than moving away from it
+        k = 0;
+        c = 0;
+      } else {
+        k = Math.max(0, Math.min(order.length - 1, Math.max(0, order.indexOf(vs.selected.row)) + dr));
+        c = Math.max(0, Math.min(cols.length - 1, vs.selected.col + dc));
+      }
+      vs.selected = { row: order[k], col: c };
+      const rowTop = HEAD_H + k * ROW_H;
+      if (rowTop < el.scrollTop + HEAD_H) el.scrollTop = rowTop - HEAD_H;
+      else if (rowTop + ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = rowTop + ROW_H - el.clientHeight;
+      const left = rowNumW + vs.widths.slice(0, c).reduce((a, b) => a + b, 0);
+      if (left < el.scrollLeft + rowNumW) el.scrollLeft = left - rowNumW;
+      else if (left + vs.widths[c] > el.scrollLeft + el.clientWidth) el.scrollLeft = left + vs.widths[c] - el.clientWidth;
+      paint();
+    }
+
     el.addEventListener('keydown', (e) => {
+      if (e.target !== el) return; // keys on a header cell or a resize handle are theirs
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c' && vs.selected && api.copyCell) {
         e.preventDefault();
-        api.copyCell(cellText(rows[vs.selected.row][vs.selected.col]));
+        api.copyCell(core.cellText(rows[vs.selected.row][vs.selected.col]));
+        return;
+      }
+      const page = Math.max(1, Math.floor((el.clientHeight - HEAD_H) / ROW_H) - 1);
+      const move = { ArrowDown: [1, 0], ArrowUp: [-1, 0], ArrowRight: [0, 1], ArrowLeft: [0, -1], PageDown: [page, 0], PageUp: [-page, 0], Home: [0, -1e6], End: [0, 1e6] }[e.key];
+      if (move) {
+        e.preventDefault();
+        moveSelection(move[0], move[1]);
       }
     });
 
     api.refresh = refresh;
+    api.fit = fit;
+    api.order = () => order.slice();
+    api.count = () => order.length;
     api.onCount = (cb) => { countCb = cb; cb(order.length); };
-    api.tsv = () => {
-      const clean = (t) => t.replace(/[\t\r\n]+/g, ' ');
-      const lines = [cols.map((c) => clean(c.name)).join('\t')];
-      for (const i of order) lines.push(rows[i].map((v) => clean(cellText(v))).join('\t'));
-      return lines.join('\n');
+    // filters: what a column's dialog needs. A column's list only holds values that exist under the OTHER columns' filters and
+    // Apply needs one ticked, so the filters can never leave the grid empty.
+    /** The values a column can still show: those among the rows the OTHER columns' filters leave. */
+    api.candidates = (col) => core.distinctValues(rows, core.applyFilters(rows, allRows(), vs.filters, col), col);
+    api.hidden = (col) => vs.filters.get(col);
+    api.otherFilters = (col) => [...vs.filters].some(([c, set]) => c !== col && set.size > 0);
+    api.filtered = () => [...vs.filters.values()].some((set) => set.size > 0);
+    api.setFilter = (col, hidden) => {
+      if (hidden && hidden.size) vs.filters.set(col, hidden); else vs.filters.delete(col);
+      refresh();
     };
+    api.clearFilters = () => { vs.filters.clear(); refresh(); };
+    api.focusFilter = (col) => { const b = headerCells[col] && headerCells[col].querySelector('.filterbtn'); if (b) b.focus(); };
+    if (!vs.widths || vs.widths.length !== cols.length) fit(); else layout();
     refresh();
     return api;
   }

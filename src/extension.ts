@@ -88,7 +88,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
     },
   );
   profiles.onDidChange(() => bindings.touch());
-  const results = new ResultsView(context.extensionUri);
+  const results = new ResultsView(context.extensionUri, settings);
+  const overlaySub = project.onDidChange(() => results.refreshSettings()); // a project's TOML can set how results look
   const runner = new QueryRunner({ queries, connections, results });
   const linting = new LintController({ lint, bindings, settings, logger });
 
@@ -113,7 +114,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
   void vscode.commands.executeCommand('setContext', 'betterSqlTools.filterActive', false);
   const sql: vscode.DocumentSelector = { language: 'sql' };
   context.subscriptions.push(
-    logger, storedProfiles, profiles, groupStore, groups, project, projectFiles, new ConfigDiagnostics(project),
+    logger, storedProfiles, profiles, groupStore, groups, project, projectFiles, new ConfigDiagnostics(project), results, overlaySub,
     bindings, linting, connectionsTree, connectionsView, new ConnectionDecorations(app), driverHost, drivers.onDidChange(syncDriverContext),
     vscode.window.registerTreeDataProvider('betterSqlTools.drivers', new DriversTree(app)),
     vscode.window.registerWebviewViewProvider(ResultsView.viewId, results, { webviewOptions: { retainContextWhenHidden: true } }),

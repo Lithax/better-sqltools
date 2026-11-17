@@ -7,6 +7,17 @@ const clamp = (v: unknown, d: number, min: number, max: number) =>
 
 export type LintMode = 'onType' | 'onSave' | 'manual';
 
+export type ColumnFit = 'fitAll' | 'fitName' | 'fitNameAndValue';
+
+/** How the results grid looks and sizes itself. */
+export interface ResultsPrefs {
+  columnFit: ColumnFit;
+  /** The data type next to each column's name. */
+  showTypes: boolean;
+  /** Values and headers coloured and styled by data type and constraints. */
+  colorByType: boolean;
+}
+
 /**
  * Reads `betterSqlTools.*` live, so setting changes apply without a reload. Values a project's TOML file sets
  * (`[settings]`) win over VS Code's user and workspace settings; `overlay` supplies them.
@@ -26,6 +37,20 @@ export class VsCodeSettings implements SettingsReader {
   }
 
   maxRows() { return clamp(this.get('results.maxRows'), 1000, 1, 1_000_000); }
+
+  resultsPrefs(): ResultsPrefs {
+    const fit = this.get<string>('results.columnFit', 'fitNameAndValue');
+    return {
+      columnFit: fit === 'fitAll' || fit === 'fitName' ? fit : 'fitNameAndValue',
+      showTypes: this.get<boolean>('results.showTypes', true) !== false,
+      colorByType: this.get<boolean>('results.colorByType', true) !== false,
+    };
+  }
+
+  /** The grid's column menu writes the user's choice back, so the setting stays the one source of truth. */
+  async setResultsColumnFit(mode: ColumnFit): Promise<void> {
+    await this.cfg.update('results.columnFit', mode, vscode.ConfigurationTarget.Global);
+  }
   connectTimeoutMs() { return clamp(this.get('connection.timeoutMs'), 30_000, 0, 600_000); }
   historyLimit() { return clamp(this.get('history.maxEntries'), 200, 0, 5000); }
   defaultDialect() { return this.get<string>('lint.defaultDialect') || 'ansi'; }

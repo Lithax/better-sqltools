@@ -893,6 +893,31 @@
           "maximum": 1000000,
           "markdownDescription": "Rows loaded per statement. Drivers stop reading after this many."
         },
+        "betterSqlTools.results.columnFit": {
+          "type": "string",
+          "enum": [
+            "fitAll",
+            "fitName",
+            "fitNameAndValue"
+          ],
+          "default": "fitNameAndValue",
+          "enumDescriptions": [
+            "Every column gets the same share of the panel, whatever its name or values are.",
+            "Each column is as wide as its name (and type).",
+            "Each column fits its name and its values, but a single very long value cannot make it wider than a sensible maximum."
+          ],
+          "markdownDescription": "How wide the results grid makes its columns. You can still drag a column's border to size it by hand, and double-click the border to fit that one column to its name and values."
+        },
+        "betterSqlTools.results.showTypes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show each column's data type next to its name in the results grid."
+        },
+        "betterSqlTools.results.colorByType": {
+          "type": "boolean",
+          "default": true,
+          "description": "Colour and style the results grid by data type and constraints: numbers, text, booleans, dates and NULLs look different, and primary and foreign keys stand out."
+        },
         "betterSqlTools.connection.timeoutMs": {
           "type": "number",
           "default": 30000,

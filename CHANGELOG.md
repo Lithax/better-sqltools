@@ -2,11 +2,23 @@
 
 ## Unreleased
 
+* **Results grid redesign.**
+  * Headers show each column's type, with `PK` / `FK` / `UQ` pills and a tooltip with the constraint details, all taken from
+    the driver; values are coloured and styled by type. `results.showTypes` and `results.colorByType` turn either off.
+  * **Per-column filters** replace the single filter box: a funnel in each header (or Alt+Down) opens the column's
+    distinct values with counts and a search; filters combine across columns, and the toolbar shows how many rows match
+    and can clear them all.
+  * Drag a column border to size it, double-click it to fit that column, and choose how all columns are sized from the
+    column-width button (`results.columnFit`).
+  * An *Export* dialog (CSV or JSON, copy or save) and a tab-separated *Copy* button, both for the rows as shown,
+    filter and sort included.
+  * The grid uses Microsoft's Codicons for its icons (licences in `media/codicons/`).
+
 * **Result columns know what they are.** A column read from a table carries its type, a driver-decided kind, and its
   constraints (primary key, not null, unique, foreign key, auto-increment, default), taken from the driver's catalog.
   Plain single-table `SELECT`s are traced to their table columns; anything the SQL makes unclear stays plain. A driver can
   report `source` itself. The SQLite driver now reports kinds, unique columns, foreign keys, defaults and the rowid alias.
-  (The results grid will use this for type labels, colours and editing.)
+  (The results grid shows these as type labels, pills and colours; editing will use them too.)
 * **Query History view**: statements grouped by day (newest first) with connection, time, duration and a pass/fail icon;
   open, run again, copy, bookmark and delete (several at once) from inline buttons or the context menu; a filter that
   keeps entries containing every word typed. Replaces the quick pick as the main way to revisit a query (the palette

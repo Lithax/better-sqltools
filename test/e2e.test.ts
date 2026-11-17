@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { after, before, test } from 'node:test';
-import { toCsv } from '../src/domain/export';
+import { toCsv, toTsv } from '../src/domain/export';
 import { SqliteDriverFactory } from '../drivers/sqlite/src';
 import { fakeFactory, type FakeDriverState } from './fakes';
 import { tmpDir } from './helpers';
@@ -283,20 +283,79 @@ test('results panel protocol: ready, copy, export', async () => {
   const handler = state.resultsHandler!;
   const before = state.resultsMessages.length;
   await handler({ type: 'ready' });
-  assert.equal(state.resultsMessages.length, before + 1, 'ready re-sends the current state');
+  assert.deepEqual(state.resultsMessages.slice(before).map((m) => m.type), ['settings', 'state'], 'ready sends how the grid should look, then the current state');
 
   await handler({ type: 'copy', text: 'a\tb' });
   assert.equal(state.clipboard, 'a\tb');
 
+  const r = lastResults().result.statements[0];
   const out = path.join(ws, 'out.csv');
   state.saveDialogAnswers.push(out);
-  await handler({ type: 'export', format: 'csv', index: 0 });
-  const r = lastResults().result.statements[0];
+  await handler({ type: 'export', format: 'csv', action: 'save', index: 0 });
   assert.equal(fs.readFileSync(out, 'utf8'), toCsv(r.columns, r.rows));
   assert.match(fs.readFileSync(out, 'utf8'), /^id,name\r\n1,Ada\r\n/);
 
+  // copy puts the rows on the clipboard, in the order the page shows them; indexes that are not rows are ignored
+  await handler({ type: 'export', format: 'csv', action: 'copy', index: 0, rows: [1, 0, 99, -1, 'x'] });
+  assert.equal(state.clipboard, toCsv(r.columns, [r.rows[1], r.rows[0]]));
+  await handler({ type: 'export', format: 'tsv', action: 'copy', index: 0 });
+  assert.equal(state.clipboard, toTsv(r.columns, r.rows), 'every row when the page does not say which');
+  await handler({ type: 'export', format: 'csv', index: 0 }); // no action means copy: nothing is written anywhere by surprise
+  assert.equal(state.clipboard, toCsv(r.columns, r.rows));
+
   state.saveDialogAnswers.push(undefined);
-  await handler({ type: 'export', format: 'json', index: 0 }); // cancelled dialog: no throw
+  await handler({ type: 'export', format: 'json', action: 'save', index: 0 }); // cancelled dialog: no throw
+});
+
+test('results panel: the column-width menu writes the setting; setting and project-file changes reach the page', async () => {
+  const handler = state.resultsHandler!;
+  const cfg = vscode.workspace.getConfiguration('betterSqlTools');
+  const fitKey = 'betterSqlTools.results.columnFit';
+  // the settings messages posted since `from`
+  const sent = (from: number) => state.resultsMessages.slice(from).filter((m) => m.type === 'settings').map((m) => m.settings);
+  const lastSent = (from: number) => { const all = sent(from); return all[all.length - 1]; };
+  const mark = () => state.resultsMessages.length;
+
+  // a valid mode is stored as the user's setting, and the page hears the result
+  let from = mark();
+  await handler({ type: 'setColumnFit', mode: 'fitAll' });
+  assert.equal(state.config.user[fitKey], 'fitAll');
+  assert.equal(lastSent(from)?.columnFit, 'fitAll');
+
+  // anything that is not one of the modes is ignored: nothing stored, nothing sent
+  from = mark();
+  for (const mode of ['stretch', '', 5, null, undefined, {}, ['fitName']]) await handler({ type: 'setColumnFit', mode });
+  await handler({ type: 'setColumnFit' });
+  assert.equal(state.config.user[fitKey], 'fitAll');
+  assert.equal(sent(from).length, 0);
+
+  // other results settings reach the page too; settings of other sections do not
+  from = mark();
+  await cfg.update('results.showTypes', false, vscode.ConfigurationTarget.Global);
+  assert.deepEqual(lastSent(from), { columnFit: 'fitAll', showTypes: false, colorByType: true });
+  from = mark();
+  await cfg.update('history.maxEntries', 10, vscode.ConfigurationTarget.Global);
+  assert.equal(sent(from).length, 0, 'a setting outside betterSqlTools.results is not the grid\'s business');
+  await cfg.update('history.maxEntries', undefined, vscode.ConfigurationTarget.Global);
+  await cfg.update('results.showTypes', undefined, vscode.ConfigurationTarget.Global);
+
+  // a project's TOML file wins over the user's setting, and editing it reaches the page without a reload
+  const toml = path.join(ws, '.better-sqltools.toml');
+  from = mark();
+  fs.writeFileSync(toml, '[settings]\n"results.columnFit" = "fitName"\n"results.colorByType" = false\n');
+  mock.events.fsChange.fire();
+  await waitFor(() => lastSent(from)?.columnFit === 'fitName');
+  assert.deepEqual(lastSent(from), { columnFit: 'fitName', showTypes: true, colorByType: false });
+
+  // removing the file gives the user's setting back
+  from = mark();
+  fs.rmSync(toml);
+  mock.events.fsChange.fire();
+  await waitFor(() => lastSent(from)?.columnFit === 'fitAll');
+  assert.deepEqual(lastSent(from), { columnFit: 'fitAll', showTypes: true, colorByType: true });
+
+  await cfg.update('results.columnFit', undefined, vscode.ConfigurationTarget.Global);
+  assert.equal(state.config.user[fitKey], undefined);
 });
 
 test('CodeLens and history', async () => {

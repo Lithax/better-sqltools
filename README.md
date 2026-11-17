@@ -47,9 +47,21 @@ To install them for real: `npm run package` and `npm run package:sqlite`, then
   statement under the cursor under a name you choose, with the connection it came from. The *Bookmarks* view lists them
   by name; open, run, rename, copy or delete from there, or use *Run Bookmarked Query…* from the palette. Bookmarks are
   stored in VS Code's global state, so they follow you into every workspace.
-* **Results panel.** A virtualised grid in the bottom panel: sticky header, click-to-sort, row filter, `NULL` and numbers
-  styled, copy a cell or the visible rows, export CSV or JSON. One tab per statement, errors shown in place, a row limit
-  (`betterSqlTools.results.maxRows`) that the driver honours, and Cancel between statements.
+* **Results panel.** A virtualised grid in the bottom panel with one tab per statement, errors shown in place, a row
+  limit (`betterSqlTools.results.maxRows`) that the driver honours, and Cancel between statements.
+  * **Types and constraints come from the driver.** Each header shows the column's name and data type, with `PK`, `FK` and
+    `UQ` pills; hover a header for the details (the table a foreign key points to, auto-increment, and so on). Values are
+    coloured and styled by type, so numbers, text, booleans, dates and `NULL` look different. Turn either off with
+    `results.showTypes` and `results.colorByType`.
+  * **Filter each column.** The funnel in a header (or Alt+Down on it) lists the column's distinct values with counts, and
+    a search box keeps only the values that match. Untick what you want hidden and press *Apply*. Columns combine, and
+    each list only offers values from the rows the other filters leave, like a spreadsheet's. The toolbar says how many
+    rows match and has a button to clear every filter.
+  * **Sort** by clicking a header. **Size columns** by dragging a header's border (double-click it to fit that column),
+    or pick *Fit all columns to the panel*, *Fit column names* or *Fit names and values* from the column-width button;
+    the pick is saved in `results.columnFit`.
+  * **Copy and export** use the rows as shown, filter and sort included. Ctrl/Cmd+C copies the selected cell, the toolbar
+    copies the rows tab-separated, and *Export* copies or saves them as CSV or JSON.
 * **Completion.** Tables, views, schemas, columns (after `alias.` or `table.`, or in `SELECT`/`WHERE`/`ON`/... from the
   tables in `FROM`), keywords and functions, in the connection's dialect. Fed from a catalog that is loaded after you
   connect and refreshed after DDL.
@@ -113,6 +125,9 @@ uses. See [docs/WRITING_A_DRIVER.md](docs/WRITING_A_DRIVER.md).
 | `betterSqlTools.connections` | `[]` | Saved connections (no passwords). |
 | `betterSqlTools.groups` | `[]` | Groups the connections are filed under. |
 | `betterSqlTools.results.maxRows` | `1000` | Rows loaded per statement. |
+| `betterSqlTools.results.columnFit` | `fitNameAndValue` | Column widths: `fitAll` (equal, to fit the panel), `fitName` or `fitNameAndValue`. Dragging a border still wins for that column. |
+| `betterSqlTools.results.showTypes` | `true` | The data type next to each column's name. |
+| `betterSqlTools.results.colorByType` | `true` | Colour and style values by type and constraints; primary and foreign keys stand out. |
 | `betterSqlTools.connection.timeoutMs` | `30000` | Connect timeout; `0` waits forever. |
 | `betterSqlTools.history.maxEntries` | `200` | Queries kept. |
 | `betterSqlTools.explorer.driverIcons` | `true` | The driver's icon in front of a connection instead of the green database icon. |
@@ -174,8 +189,9 @@ Tests, and what they stand in for:
   `Linter` port; an LSP adapter could slot in there. Completion runs in-process and is deliberately simple: it does not
   look into subqueries or CTEs, does not complete inside quoted identifiers, and offers no signature help.
 * **Statement splitting** does not understand `GO` batch separators, MySQL's `DELIMITER`, or Oracle anonymous `BEGIN … END;` blocks.
-* **Results are read-only**, export covers the loaded rows (up to the row limit), columns cannot be resized, and results are
-  not pinned between runs.
+* **Results are read-only**, filters and export cover the loaded rows (up to the row limit), and results are not pinned
+  between runs. A value a project's `.better-sqltools.toml` sets for a `results.*` setting wins over the column-width
+  button, so the button's pick snaps back until that line is removed from the file.
 * `${workspaceFolder}` means the first workspace folder.
 
 ## Roadmap
@@ -186,4 +202,5 @@ driver-independent feature; publishing the API types as a package.
 
 ## License
 
-MIT
+MIT. The icons in the results grid come from [Microsoft's Codicons](https://github.com/microsoft/vscode-codicons): the
+icons are CC BY 4.0 and the font's code is MIT; both licences are in `media/codicons/`.
