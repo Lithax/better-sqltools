@@ -35,6 +35,7 @@ import { DriverRegistry } from './application/driver-registry';
 import { LintService } from './application/lint-service';
 import type { SecretPrompter } from './application/ports';
 import { QueryService } from './application/query-service';
+import { EditService } from './application/edit-service';
 import { SchemaService } from './application/schema-service';
 
 let shutdown: (() => Promise<void>) | undefined;
@@ -88,7 +89,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Better
     },
   );
   profiles.onDidChange(() => bindings.touch());
-  const results = new ResultsView(context.extensionUri, settings);
+  const edits = new EditService({ connections, schema });
+  const results = new ResultsView(context.extensionUri, settings, edits);
   const overlaySub = project.onDidChange(() => results.refreshSettings()); // a project's TOML can set how results look
   const runner = new QueryRunner({ queries, connections, results });
   const linting = new LintController({ lint, bindings, settings, logger });

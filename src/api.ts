@@ -13,13 +13,14 @@
 import type { DriverFactory } from './application/ports';
 
 export type {
-  ChildrenOptions, Driver, DriverConfig, DriverEnvironment, DriverFactory, ExecutionContext, Logger, RawStatementResult,
+  ChildrenOptions, Driver, DriverConfig, DriverEdit, DriverEnvironment, DriverFactory, ExecutionContext, Logger, RawStatementResult,
+  RowChange, RowChangeResult,
 } from './application/ports';
 export type {
   ConnectionField, DialectInfo, DriverCapabilities, DriverDescriptor, DriverIcon, FieldType,
 } from './domain/driver-descriptor';
 export type {
-  Catalog, CatalogColumn, CatalogTable, Column, ColumnKind, ColumnSource, DriverInspection, ForeignKeyRef, HealthStatus, InspectItem,
+  Catalog, CatalogColumn, CatalogTable, Cell, Column, ColumnKind, ColumnSource, DriverInspection, ForeignKeyRef, HealthStatus, InspectItem,
   InspectSection, NodeKind, SchemaNode,
 } from './domain/model';
 

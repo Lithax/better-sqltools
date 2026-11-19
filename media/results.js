@@ -19,7 +19,10 @@
   let timer = null;
   let exportFormat = 'csv';
   let openPop = null; // the popover that is open, if any
-  const views = new Map(); // statement index -> { sort, selected, widths, manual }
+  const views = new Map(); // statement index -> { sort, selected, widths, manual, filters, unlocked }
+  const edits = new Map(); // statement index -> what the host says about editing it: editable, why not, mode, pending edits
+  const live = new Map(); // statement index -> the grid on show, so replies from the host can reach it
+  let editSeq = 0;
 
   // ---- tiny DOM helper. Everything goes through textContent: database values are untrusted. ----
   function h(tag, attrs) {
@@ -52,7 +55,7 @@
 
   function viewOf(index) {
     let v = views.get(index);
-    if (!v) views.set(index, (v = { sort: null, selected: null, widths: null, manual: false, filters: new Map() }));
+    if (!v) views.set(index, (v = { sort: null, selected: null, widths: null, manual: false, filters: new Map(), unlocked: false }));
     return v;
   }
 
@@ -71,6 +74,17 @@
       render();
       return;
     }
+    if (m.type === 'editStatus') {
+      edits.set(m.index, m.status);
+      const g = live.get(m.index);
+      if (g) g.editsChanged();
+      return;
+    }
+    if (m.type === 'editResult' || m.type === 'editEnd') {
+      const g = live.get(m.index);
+      if (g) (m.type === 'editResult' ? g.editResult : g.editEnd)(m);
+      return;
+    }
     if (m.type !== 'state') return;
     const prev = state;
     state = m.state;
@@ -79,6 +93,7 @@
       if (!same) {
         tab = initialTab(state.result);
         views.clear();
+        edits.clear();
       }
     }
     render();
@@ -279,6 +294,7 @@
   // ---- views ----
   function render() {
     closePopover(false);
+    live.clear();
     if (timer) {
       clearInterval(timer);
       timer = null;
@@ -362,7 +378,11 @@
     const grid = createGrid(s, vs);
     const shown = h('span', { class: 'muted' });
     const toast = h('span', { class: 'toast', role: 'status' });
-    const say = (t) => { toast.textContent = t; setTimeout(() => { if (toast.textContent === t) toast.textContent = ''; }, 1500); };
+    const say = (t, ms, bad) => {
+      toast.textContent = t;
+      toast.classList.toggle('bad', !!bad);
+      setTimeout(() => { if (toast.textContent === t) { toast.textContent = ''; toast.classList.remove('bad'); } }, ms || 1500);
+    };
 
     const fitBtn = iconButton('arrow-both', 'Column widths', () => fitMenu(fitBtn, grid), { 'aria-haspopup': 'dialog', 'aria-expanded': 'false' });
     const clearBtn = iconButton('clear-all', 'Clear all filters', () => grid.clearFilters());
@@ -372,7 +392,8 @@
     });
     const exportBtn = iconButton('export', 'Export the rows shown\u2026', () => exportDialog(exportBtn, s, grid, say), { 'aria-haspopup': 'dialog', 'aria-expanded': 'false' });
 
-    const toolbar = h('div', { class: 'toolbar' }, h('span', { class: 'runinfo', title: summary }, summary), shown, h('span', { class: 'spacer' }), toast, fitBtn, copyBtn, exportBtn);
+    const bar = editBar(s, vs, grid, say);
+    const toolbar = h('div', { class: 'toolbar' }, h('span', { class: 'runinfo', title: summary }, summary), shown, h('span', { class: 'spacer' }), toast, ...bar.nodes, fitBtn, copyBtn, exportBtn);
     // what the filters leave is said in words, and the way back to everything is offered only while a filter is on
     grid.onCount((n) => {
       shown.textContent = n === s.rows.length ? '' : fmtInt(n) + ' of ' + fmtInt(s.rows.length) + ' rows match';
@@ -387,7 +408,52 @@
         s.truncated ? h('span', { class: 'warn' }, ' \u00b7 stopped at the row limit (betterSqlTools.results.maxRows)') : null));
 
     grid.copyCell = (text) => { vscode.postMessage({ type: 'copy', text: text }); say('Copied'); };
+    grid.say = say;
+    grid.onEditStatus = bar.update;
+    live.set(s.index, grid);
+    bar.update();
     return panel;
+  }
+
+  /**
+   * The lock, and in manual mode Commit and Roll back. The page only asks: whether a value is accepted, and what the database
+   * ends up holding, is the host's to say. A result the host says cannot be edited keeps its lock shut and says why.
+   */
+  function editBar(s, vs, grid, say) {
+    const lock = iconButton('lock', 'Locked', () => {
+      const st = edits.get(s.index);
+      if (!st || !st.editable) { say('Read-only: ' + ((st && st.reason) || 'these rows cannot be edited.'), 5000); return; }
+      vs.unlocked = !vs.unlocked;
+      grid.lockChanged();
+      update();
+    }, { 'aria-pressed': 'false' });
+    const count = h('span', { class: 'pendingcount' });
+    const commit = h('button', { class: 'txnbtn primary', type: 'button', title: 'Make the pending edits final', onclick: () => vscode.postMessage({ type: 'commit', index: s.index }) }, icon('check'), 'Commit');
+    const rollback = h('button', { class: 'txnbtn', type: 'button', title: 'Undo every pending edit', onclick: () => vscode.postMessage({ type: 'rollback', index: s.index }) }, icon('discard'), 'Roll back');
+
+    function update() {
+      const st = edits.get(s.index);
+      lock.style.display = st ? '' : 'none'; // nothing is known until the host has looked at the result
+      if (st) {
+        const ok = !!st.editable;
+        const on = ok && vs.unlocked;
+        lock.replaceChildren(icon(on ? 'unlock' : 'lock'));
+        lock.classList.toggle('disabled', !ok);
+        lock.setAttribute('aria-disabled', ok ? 'false' : 'true');
+        lock.setAttribute('aria-pressed', on ? 'true' : 'false');
+        const label = !ok ? 'Read-only: ' + (st.reason || 'these rows cannot be edited.')
+          : on ? 'Editing is on. Double-click a cell or press Enter to change it. Click to lock again.'
+            : 'Locked. Click to edit the values in this grid.';
+        const full = label + (ok && st.note ? ' ' + st.note : '');
+        lock.title = full;
+        lock.setAttribute('aria-label', full);
+      }
+      const n = st ? st.pending.length : 0;
+      const open = !!st && (st.transaction || n > 0);
+      count.style.display = commit.style.display = rollback.style.display = open ? '' : 'none';
+      count.textContent = n === 1 ? '1 pending edit' : n + ' pending edits';
+    }
+    return { nodes: [count, commit, rollback, lock], update: update };
   }
 
   // ---- measuring text, to fit columns ----
@@ -431,7 +497,7 @@
     let headerCells = [];
     let countCb = null;
     let lastClientWidth = 0;
-    const api = { el: el, copyCell: null };
+    const api = { el: el, copyCell: null, say: null, onEditStatus: null };
     const totalWidth = () => rowNumW + vs.widths.reduce((a, b) => a + b, 0);
 
     /** What each column needs: for its header, and for the widest of the first rows' values. */
@@ -583,9 +649,14 @@
       const first = Math.max(0, Math.floor((top - HEAD_H) / ROW_H) - BUFFER);
       const last = Math.min(order.length, Math.ceil((top + view) / ROW_H) + BUFFER);
       body.style.transform = 'translateY(' + (HEAD_H + first * ROW_H) + 'px)';
+      pendingKeys = pendingSet();
+      const hadFocus = !!editing && document.activeElement === editing.input;
       const frag = document.createDocumentFragment();
       for (let k = first; k < last; k++) frag.append(rowEl(order[k]));
+      repainting = true; // taking the editor out of the page for a moment must not read as the person leaving it
       body.replaceChildren(frag);
+      repainting = false;
+      if (hadFocus && editing && editing.input.isConnected) editing.input.focus();
     }
 
     function rowEl(ri) {
@@ -595,12 +666,78 @@
         const f = core.describe(row[c]);
         const col = cols[c];
         const selected = vs.selected && vs.selected.row === ri && vs.selected.col === c;
+        const here = !!editing && editing.row === ri && editing.col === c;
+        const pending = pendingKeys.has(ri + ':' + c);
         r.append(h('div', {
-          class: 'cell ' + f.cls + ' k-' + kinds[c] + (col.primaryKey ? ' c-pk' : '') + (col.foreignKey ? ' c-fk' : '') + (selected ? ' sel' : ''),
-          role: 'gridcell', style: { width: vs.widths[c] + 'px' }, title: f.title, 'data-r': String(ri), 'data-c': String(c),
-        }, f.text));
+          class: 'cell ' + f.cls + ' k-' + kinds[c] + (col.primaryKey ? ' c-pk' : '') + (col.foreignKey ? ' c-fk' : '') + (selected ? ' sel' : '')
+            + (canEditCell(c) ? ' editable' : '') + (pending ? ' pending' : '') + (here ? ' editing' : ''),
+          role: 'gridcell', style: { width: vs.widths[c] + 'px' }, title: pending ? f.title + '\n(changed, not committed yet)' : f.title, 'data-r': String(ri), 'data-c': String(c),
+        }, here ? editing.el : f.text));
       }
       return r;
+    }
+
+    // ---- editing: the lock decides whether a cell may be changed, the host whether a value is accepted ----
+    let editing = null; // { row, col, el, input, original, wasNull, busy, id, refocus }
+    let pendingKeys = new Set();
+    let repainting = false;
+    const editInfo = () => edits.get(s.index);
+    const tell = (text, ms, bad) => { if (api.say) api.say(text, ms, bad); };
+    const pendingSet = () => { const st = editInfo(); return new Set(st ? st.pending.map((p) => p.row + ':' + p.col) : []); };
+    function canEditCell(c) {
+      const st = editInfo();
+      return !!(vs.unlocked && st && st.editable && st.columns[c] && st.columns[c].editable);
+    }
+
+    function startEdit(ri, c) {
+      const st = editInfo();
+      if (!vs.unlocked || !st || !st.editable || (editing && editing.busy)) return;
+      if (editing && editing.row === ri && editing.col === c) return; // already open (a click pair can also be followed by a dblclick)
+      if (!canEditCell(c)) { tell((st.columns[c] && st.columns[c].reason) || 'This column cannot be edited.', 4000); return; }
+      const v = rows[ri][c];
+      if (typeof v === 'object' && v !== null) { tell('Binary values cannot be edited here.', 4000); return; }
+      const text = v === null ? '' : core.cellText(v);
+      const input = h('input', { class: 'cell-input', type: 'text', spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Edit ' + cols[c].name, placeholder: v === null ? 'NULL' : null });
+      input.value = text;
+      const kids = [input];
+      if (!cols[c].notNull) {
+        kids.push(h('button', { class: 'nullbtn', type: 'button', tabindex: '-1', title: 'Set to NULL', onmousedown: (e) => e.preventDefault(), onclick: () => submit(true, true) }, 'NULL'));
+      }
+      editing = { row: ri, col: c, el: h('div', { class: 'cell-edit' }, ...kids), input: input, original: text, wasNull: v === null, busy: false, id: 0, refocus: false };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); submit(false, true); }
+        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (editing && !editing.busy) { cancelEdit(); el.focus(); } }
+      });
+      // leaving the editor keeps what was typed, as in VS Code's own settings editor; Escape is the way to drop it
+      input.addEventListener('blur', () => { if (!repainting && editing && editing.input === input && !editing.busy) submit(false, false); });
+      input.addEventListener('input', () => { input.removeAttribute('aria-invalid'); input.removeAttribute('title'); });
+      vs.selected = { row: ri, col: c };
+      paint();
+      input.focus();
+      input.select();
+    }
+
+    function cancelEdit() {
+      if (!editing) return;
+      editing = null;
+      paint();
+    }
+
+    /** Sends what was typed (null for NULL). Nothing changes on the page until the host has answered. */
+    function submit(asNull, refocus) {
+      const ed = editing;
+      if (!ed || ed.busy) return;
+      const value = asNull ? null : ed.input.value;
+      if (asNull ? ed.wasNull : value === ed.original) { // nothing differs from what is there
+        cancelEdit();
+        if (refocus) el.focus();
+        return;
+      }
+      ed.busy = true;
+      ed.refocus = refocus;
+      ed.input.readOnly = true;
+      ed.id = ++editSeq;
+      vscode.postMessage({ type: 'edit', index: s.index, row: ed.row, col: ed.col, value: value, id: ed.id });
     }
 
     let raf = 0;
@@ -619,10 +756,21 @@
     }
 
     el.addEventListener('click', (e) => {
+      if (e.target.closest && e.target.closest('.cell-edit')) return; // a click inside the editor is the editor's
       const cell = e.target.closest ? e.target.closest('.cell[data-r]') : null;
       if (!cell) return;
-      vs.selected = { row: Number(cell.dataset.r), col: Number(cell.dataset.c) };
+      const r = Number(cell.dataset.r);
+      const c = Number(cell.dataset.c);
+      // A double click is the second click on the selected cell. The browser's own `dblclick` cannot be the only trigger: the first click
+      // repaints the grid, the clicked element is gone by the second one, and Chromium then never fires `dblclick`.
+      if (e.detail === 2 && vs.selected && vs.selected.row === r && vs.selected.col === c) { startEdit(r, c); return; }
+      vs.selected = { row: r, col: c };
       paint();
+    });
+    el.addEventListener('dblclick', (e) => {
+      if (e.target.closest && e.target.closest('.cell-edit')) return;
+      const cell = e.target.closest ? e.target.closest('.cell[data-r]') : null;
+      if (cell) startEdit(Number(cell.dataset.r), Number(cell.dataset.c));
     });
 
     /** Moves the selected cell, keeping it in view. */
@@ -649,6 +797,11 @@
 
     el.addEventListener('keydown', (e) => {
       if (e.target !== el) return; // keys on a header cell or a resize handle are theirs
+      if ((e.key === 'Enter' || e.key === 'F2') && vs.unlocked && vs.selected) {
+        e.preventDefault();
+        startEdit(vs.selected.row, vs.selected.col);
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c' && vs.selected && api.copyCell) {
         e.preventDefault();
         api.copyCell(core.cellText(rows[vs.selected.row][vs.selected.col]));
@@ -662,6 +815,40 @@
       }
     });
 
+    // what the host tells the page about editing: the status, the answer to an edit, and how a commit or rollback ended
+    api.editsChanged = () => {
+      if (editing && !editing.busy && !canEditCell(editing.col)) editing = null;
+      paint();
+      if (api.onEditStatus) api.onEditStatus();
+    };
+    api.lockChanged = () => {
+      if (!vs.unlocked && editing && !editing.busy) editing = null;
+      paint();
+    };
+    api.editResult = (m) => {
+      const ed = editing;
+      const mine = !!ed && ed.id === m.id;
+      if (m.ok) {
+        if (m.changed && rows[m.row]) rows[m.row][m.col] = m.value; // the value as the database holds it now
+        if (mine) editing = null;
+        paint();
+        if (mine && ed.refocus) el.focus();
+        return;
+      }
+      tell(m.error, 6000, true);
+      if (!mine) return;
+      ed.busy = false;
+      ed.input.readOnly = false;
+      ed.input.setAttribute('aria-invalid', 'true');
+      ed.input.title = m.error;
+      if (ed.input.isConnected) ed.input.focus();
+    };
+    api.editEnd = (m) => {
+      if (!m.ok) { tell(m.error, 6000, true); return; }
+      (m.restored || []).forEach((r) => { if (rows[r.row]) rows[r.row][r.col] = r.value; });
+      if (m.count) tell((m.kind === 'commit' ? 'Committed ' : 'Rolled back ') + m.count + (m.count === 1 ? ' edit' : ' edits'), 2500);
+      paint();
+    };
     api.refresh = refresh;
     api.fit = fit;
     api.order = () => order.slice();

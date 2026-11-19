@@ -11,7 +11,7 @@ import { after, before, test } from 'node:test';
 import { toCsv, toTsv } from '../src/domain/export';
 import { SqliteDriverFactory } from '../drivers/sqlite/src';
 import { fakeFactory, type FakeDriverState } from './fakes';
-import { tmpDir } from './helpers';
+import { testEnv, tmpDir } from './helpers';
 import { installVscodeMock } from './vscode-mock';
 
 const ws = tmpDir();
@@ -283,7 +283,7 @@ test('results panel protocol: ready, copy, export', async () => {
   const handler = state.resultsHandler!;
   const before = state.resultsMessages.length;
   await handler({ type: 'ready' });
-  assert.deepEqual(state.resultsMessages.slice(before).map((m) => m.type), ['settings', 'state'], 'ready sends how the grid should look, then the current state');
+  assert.deepEqual(state.resultsMessages.slice(before).map((m) => m.type), ['settings', 'state', 'editStatus'], 'ready sends how the grid should look, the current state, then what can be edited in it');
 
   await handler({ type: 'copy', text: 'a\tb' });
   assert.equal(state.clipboard, 'a\tb');
@@ -332,7 +332,7 @@ test('results panel: the column-width menu writes the setting; setting and proje
   // other results settings reach the page too; settings of other sections do not
   from = mark();
   await cfg.update('results.showTypes', false, vscode.ConfigurationTarget.Global);
-  assert.deepEqual(lastSent(from), { columnFit: 'fitAll', showTypes: false, colorByType: true });
+  assert.deepEqual(lastSent(from), { columnFit: 'fitAll', showTypes: false, colorByType: true, editMode: 'autoCommit' });
   from = mark();
   await cfg.update('history.maxEntries', 10, vscode.ConfigurationTarget.Global);
   assert.equal(sent(from).length, 0, 'a setting outside betterSqlTools.results is not the grid\'s business');
@@ -345,17 +345,137 @@ test('results panel: the column-width menu writes the setting; setting and proje
   fs.writeFileSync(toml, '[settings]\n"results.columnFit" = "fitName"\n"results.colorByType" = false\n');
   mock.events.fsChange.fire();
   await waitFor(() => lastSent(from)?.columnFit === 'fitName');
-  assert.deepEqual(lastSent(from), { columnFit: 'fitName', showTypes: true, colorByType: false });
+  assert.deepEqual(lastSent(from), { columnFit: 'fitName', showTypes: true, colorByType: false, editMode: 'autoCommit' });
 
   // removing the file gives the user's setting back
   from = mark();
   fs.rmSync(toml);
   mock.events.fsChange.fire();
   await waitFor(() => lastSent(from)?.columnFit === 'fitAll');
-  assert.deepEqual(lastSent(from), { columnFit: 'fitAll', showTypes: true, colorByType: true });
+  assert.deepEqual(lastSent(from), { columnFit: 'fitAll', showTypes: true, colorByType: true, editMode: 'autoCommit' });
 
   await cfg.update('results.columnFit', undefined, vscode.ConfigurationTarget.Global);
   assert.equal(state.config.user[fitKey], undefined);
+});
+
+// ---- editing a result in the grid: the page's messages, the real driver, and what the database really holds ----
+
+const sentSince = (from: number, type: string) => state.resultsMessages.slice(from).filter((m) => m.type === type);
+
+/** Runs one statement from an editor and waits until the host has said what can be edited in it. */
+async function showResult(sql: string) {
+  const from = state.resultsMessages.length;
+  await mock.openSql(`${sql}|`);
+  await run('runStatement');
+  const status = await waitFor(() => sentSince(from, 'editStatus').at(-1));
+  return { from, status: status.status, statement: lastResults().result.statements[0] };
+}
+
+test('editing: what can be edited, and an edit reaches the database', async () => {
+  const handler = state.resultsHandler!;
+  await mock.openSql('create table shelf (id integer primary key, title text not null, qty integer);\ninsert into shelf (title, qty) values (\'Dune\', 3), (\'Emma\', 5);|');
+  await run('runFile');
+
+  // a plain read of one table with its key: every column can be edited, and saved at once by default
+  let shown = await showResult('select id, title, qty from shelf order by id');
+  assert.equal(shown.status.editable, true);
+  assert.equal(shown.status.mode, 'autoCommit');
+  assert.deepEqual(shown.status.columns.map((c: any) => c.editable), [true, true, true]);
+  assert.equal(shown.status.transaction, false);
+
+  let from = state.resultsMessages.length;
+  await handler({ type: 'edit', index: 0, row: 0, col: 1, value: 'Dune II', id: 7 });
+  const reply = sentSince(from, 'editResult')[0];
+  assert.deepEqual({ ...reply }, { type: 'editResult', id: 7, index: 0, row: 0, col: 1, ok: true, value: 'Dune II', changed: true });
+  assert.equal(shown.statement.rows[0][1], 'Dune II', 'the host\'s copy of the result follows, so copy and export see the edit');
+  assert.equal(sentSince(from, 'editStatus').at(-1).status.pending.length, 0, 'auto-commit leaves nothing pending');
+
+  // the database has it: a fresh query, and the file on disk through another connection
+  shown = await showResult('select title from shelf where id = 1');
+  assert.equal(shown.statement.rows[0][0], 'Dune II');
+  const check = new SqliteDriverFactory().create({ options: { path: path.join(ws, 'e2e.db'), readOnly: true, foreignKeys: true, createIfMissing: false }, secrets: {} }, testEnv());
+  await check.open();
+  assert.deepEqual((await check.execute('select title from shelf where id = 1', { maxRows: 10 })).rows, [['Dune II']], 'saved to the file');
+  await check.close();
+
+  // what is refused comes back as a reason, and nothing changes
+  shown = await showResult('select id, title, qty from shelf order by id');
+  const refuse = async (message: object, pattern: RegExp) => {
+    from = state.resultsMessages.length;
+    await handler({ type: 'edit', index: 0, ...message });
+    const r = sentSince(from, 'editResult')[0];
+    assert.equal(r.ok, false, JSON.stringify(message));
+    assert.match(r.error, pattern);
+  };
+  await refuse({ row: 0, col: 2, value: 'abc' }, /whole number/);
+  await refuse({ row: 0, col: 1, value: null }, /cannot be NULL/);
+  await refuse({ row: 9, col: 1, value: 'x' }, /no such cell/);
+  await refuse({ row: 0, col: 1, value: 42 }, /nothing to store/);
+  await refuse({ index: 9, row: 0, col: 1, value: 'x' }, /no longer open/);
+  assert.deepEqual(shown.statement.rows[0], [1, 'Dune II', 3]);
+
+  // read-only results say why, per result
+  shown = await showResult('select upper(title) as t from shelf'); // no `|` in the SQL: the mock reads it as the cursor
+  assert.equal(shown.status.editable, false);
+  assert.match(shown.status.reason, /straight from a table column/);
+  shown = await showResult('select title, qty from shelf');
+  assert.equal(shown.status.editable, false);
+  assert.match(shown.status.reason, /Select the primary key \(id\)/);
+});
+
+test('editing, manual mode: edits wait for Commit or Roll back, and a new run does not drop them silently', async () => {
+  const handler = state.resultsHandler!;
+  const cfg = vscode.workspace.getConfiguration('betterSqlTools');
+  await cfg.update('results.editMode', 'manual', vscode.ConfigurationTarget.Global);
+  try {
+    const select = 'select id, title, qty from shelf order by id';
+    let shown = await showResult(select);
+    assert.equal(shown.status.mode, 'manual');
+
+    // roll back: the value in the database and in the rows goes back, and the page is told which cells changed
+    let from = state.resultsMessages.length;
+    await handler({ type: 'edit', index: 0, row: 0, col: 2, value: '30' });
+    let status = sentSince(from, 'editStatus').at(-1).status;
+    assert.equal(status.transaction, true);
+    assert.deepEqual(status.pending, [{ row: 0, col: 2, before: 3, after: 30 }]);
+    from = state.resultsMessages.length;
+    await handler({ type: 'rollback', index: 0 });
+    assert.deepEqual({ ...sentSince(from, 'editEnd')[0] }, { type: 'editEnd', index: 0, kind: 'rollback', ok: true, count: 1, restored: [{ row: 0, col: 2, value: 3 }] });
+    assert.equal(shown.statement.rows[0][2], 3);
+    assert.equal(sentSince(from, 'editStatus').at(-1).status.transaction, false);
+
+    // commit: now it is final
+    await handler({ type: 'edit', index: 0, row: 0, col: 2, value: '30' });
+    from = state.resultsMessages.length;
+    await handler({ type: 'commit', index: 0 });
+    assert.deepEqual({ ...sentSince(from, 'editEnd')[0] }, { type: 'editEnd', index: 0, kind: 'commit', ok: true, count: 1, restored: [] });
+    shown = await showResult('select qty from shelf where id = 1');
+    assert.equal(shown.statement.rows[0][0], 30);
+
+    // an edit left pending, then a new run: the person is asked; cancelling keeps the result and the edit as they are
+    shown = await showResult(select);
+    await handler({ type: 'edit', index: 0, row: 1, col: 1, value: 'Emma!' });
+    const shownBefore = lastResults();
+    const asked = state.messages.length;
+    state.messageAnswers.push(undefined);
+    await mock.openSql('select 1|');
+    await run('runStatement');
+    assert.match(state.messages[asked].message, /1 edit is not committed yet/);
+    assert.equal(state.messages[asked].kind, 'warning');
+    assert.equal(lastResults(), shownBefore, 'cancelled: the result on show is still the same one');
+    assert.equal(shown.statement.rows[1][1], 'Emma!');
+
+    // rolling back lets the run go on, and the edit is gone from the database
+    state.messageAnswers.push('Roll back');
+    await run('runStatement');
+    assert.equal(lastResults().result.statements[0].rows[0][0], 1);
+    shown = await showResult('select title from shelf where id = 2');
+    assert.equal(shown.statement.rows[0][0], 'Emma');
+  } finally {
+    await cfg.update('results.editMode', undefined, vscode.ConfigurationTarget.Global);
+  }
+  await mock.openSql('drop table shelf|');
+  await run('runStatement');
 });
 
 test('CodeLens and history', async () => {

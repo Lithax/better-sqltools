@@ -18,6 +18,8 @@ export class QueryRunner {
     const { queries, connections, results } = this.deps;
     const name = connections.info(connectionId)?.profile.name ?? connectionId;
 
+    // edits made in the grid and not committed yet are the person's to settle before the result is replaced
+    if (!(await results.resolvePending())) return;
     this.current?.abort(); // a newer run supersedes an older one (stops its remaining statements)
     const abort = (this.current = new AbortController());
     const mine = ++this.seq;

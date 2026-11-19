@@ -8,7 +8,7 @@
 import type { ConnectionGroup } from '../domain/model';
 import type { ConnectionField, DriverDescriptor, DriverIcon } from '../domain/driver-descriptor';
 import type {
-  Bookmark, Catalog, Column, ConnectionId, ConnectionProfile, DriverInspection, HistoryEntry, LintIssue, SchemaNode,
+  Bookmark, Catalog, Cell, Column, ConnectionId, ConnectionProfile, DriverInspection, HistoryEntry, LintIssue, SchemaNode,
 } from '../domain/model';
 import type { Event } from './events';
 
@@ -29,6 +29,38 @@ export interface RawStatementResult {
   notices?: string[];
 }
 
+/** One row of one table to change: found by the values of its primary key, then the listed columns are set. */
+export interface RowChange {
+  table: { schema?: string; name: string };
+  /** The primary key as the grid shows the row now: every column of the key, in the key's order. */
+  key: { column: string; value: Cell }[];
+  /** Table column names (never result aliases) and the values to store; the driver turns them into its own literals or parameters. */
+  set: { column: string; value: Cell }[];
+}
+
+export interface RowChangeResult {
+  /** How many rows the statement changed. The driver must make sure it is exactly one before it reports success. */
+  affectedRows: number;
+  /** The columns just set, read back as the database now holds them (conversions, triggers, defaults). Optional. */
+  values?: Record<string, unknown>;
+}
+
+/**
+ * Optional: lets the grid edit rows. A driver that has it builds the statement itself, since quoting and literals are its
+ * business. The core only offers editing for results whose rows are told apart by a primary key (see `editTarget`).
+ */
+export interface DriverEdit {
+  /** Changes exactly one row. Rejects, and changes nothing, when no row matches or more than one would change. */
+  update(change: RowChange): Promise<RowChangeResult>;
+  /**
+   * Optional, all three or none: with them the person can keep edits pending and commit or roll them back together.
+   * After `begin`, `update` joins the transaction and nothing is final until `commit`.
+   */
+  begin?(): Promise<void>;
+  commit?(): Promise<void>;
+  rollback?(): Promise<void>;
+}
+
 export interface Driver {
   open(): Promise<void>;
   close(): Promise<void>;
@@ -44,6 +76,8 @@ export interface Driver {
   ping?(): Promise<void>;
   /** Optional: version, size, settings and health checks for the "Inspect connection" view. */
   inspect?(): Promise<DriverInspection>;
+  /** Optional: edit rows in a result. Without it results are read-only. */
+  edit?: DriverEdit;
 }
 
 export interface DriverConfig {

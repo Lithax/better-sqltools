@@ -10,7 +10,7 @@ The contract has three parts:
 | --- | --- |
 | `DriverDescriptor` | Static data: id, name, SQL dialect, capabilities and the **connection schema** the form is generated from. |
 | `DriverFactory` | `create({ options, secrets }, env)` returns a `Driver`. |
-| `Driver` | `open`, `close`, `execute` (one statement), `children` (the tree), plus optional `catalog` and `ddl`. |
+| `Driver` | `open`, `close`, `execute` (one statement), `children` (the tree), plus optional `catalog`, `ddl` and `edit`. |
 
 All types come from [`src/api.ts`](../src/api.ts). They are structural and contain no VS Code imports, so a driver can
 also be written in plain JavaScript and unit-tested in plain Node.
@@ -176,10 +176,43 @@ do not know, and never invent it.
   everything else (expressions, aggregates, subqueries) without extra facts. A driver that only implements `catalog()`
   therefore already gets typed, constraint-aware results for simple queries.
 
+## Editing rows
+
+Give the driver an optional `edit` object and the results grid can change rows. Leave it out and results stay read-only.
+The core decides *whether* a result is editable (one table that is not a view, with its primary key among the selected
+columns, so `catalog()` and the column facts above matter) and checks every value against the column's type before it
+calls you. You decide *how* the change is written, because quoting, literals and parameters are your database's business.
+
+```ts
+edit: {
+  // One row: found by the values of its primary key, then the listed columns are set.
+  // change = { table: { schema?, name }, key: [{ column, value }], set: [{ column, value }] }
+  async update(change) {
+    const changed = await runUpdate(change);        // your own UPDATE ... WHERE <key> = ...
+    if (changed !== 1) throw new Error(`${changed} rows would change, expected exactly 1`); // after undoing the statement
+    return { affectedRows: 1, values: await readBack(change) };   // `values` is optional
+  },
+  // Optional, all three or none: lets the person keep edits pending (`results.editMode` = `manual`).
+  async begin() {},
+  async commit() {},
+  async rollback() {},
+},
+```
+
+* `update` must change **exactly one row** or change nothing and reject; the grid never sends a statement that could touch
+  more. `set` and `key` use table column names, never result aliases.
+* Return `values` (the columns just set, as the database now holds them) when it can convert or default what was stored;
+  the grid then shows those values instead of what was typed.
+* With `begin`, `commit` and `rollback`, the first edit in manual mode calls `begin`, later `update`s join that
+  transaction, and nothing is final until `commit`. Make `commit` and `rollback` safe to call with no transaction open, so
+  a half-failed commit cannot leave the connection stuck. Without them each edit is final at once and the grid says so.
+* In manual mode the core keeps one open transaction per connection: while one result has edits waiting, a second result of
+  the same connection cannot edit, so `begin` is not called again before `commit` or `rollback`.
+
 ## Capabilities
 
 `capabilities` is advisory today (shown in the Drivers view). Implementing the optional methods is what enables the
-features: `catalog` speeds up completion, `ddl` enables *Show DDL*.
+features: `catalog` speeds up completion, `ddl` enables *Show DDL*, `edit` enables editing in the results grid.
 
 ## Testing
 

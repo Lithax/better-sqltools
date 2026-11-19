@@ -14,11 +14,23 @@
     filter and sort included.
   * The grid uses Microsoft's Codicons for its icons (licences in `media/codicons/`).
 
+* **Edit rows in the results grid.** The grid starts locked; the lock button unlocks it when the result can be edited
+  (one table, not a view, with its primary key selected, and a driver that supports editing: SQLite does). Double-click a
+  cell or press Enter / F2, type, press Enter; Escape drops the change and a *NULL* button stores `NULL`. Values are checked
+  against the column's type, precision, length and `NOT NULL` before they reach the database, and the grid then shows what
+  the database actually stored. Computed, repeated and binary columns stay read-only, and the lock says why a whole
+  result is. `results.editMode` chooses between saving every edit at once (`autoCommit`, the default) and `manual`:
+  edits wait in a transaction, changed cells are marked, and *Commit* / *Roll back* in the toolbar end it. Running another
+  statement over a result with edits waiting asks first; one connection holds one transaction.
+* **Drivers can offer editing.** The optional `Driver.edit` (`update`, plus `begin` / `commit` / `rollback` for manual
+  mode) builds the statement itself and must change exactly one row; `DriverEdit`, `RowChange` and `RowChangeResult` are
+  part of the public API (see `docs/WRITING_A_DRIVER.md`). The SQLite driver implements it with a savepoint per edit.
+
 * **Result columns know what they are.** A column read from a table carries its type, a driver-decided kind, and its
   constraints (primary key, not null, unique, foreign key, auto-increment, default), taken from the driver's catalog.
   Plain single-table `SELECT`s are traced to their table columns; anything the SQL makes unclear stays plain. A driver can
   report `source` itself. The SQLite driver now reports kinds, unique columns, foreign keys, defaults and the rowid alias.
-  (The results grid shows these as type labels, pills and colours; editing will use them too.)
+  (The results grid shows these as type labels, pills and colours; editing uses them too.)
 * **Query History view**: statements grouped by day (newest first) with connection, time, duration and a pass/fail icon;
   open, run again, copy, bookmark and delete (several at once) from inline buttons or the context menu; a filter that
   keeps entries containing every word typed. Replaces the quick pick as the main way to revisit a query (the palette

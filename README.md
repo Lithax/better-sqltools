@@ -62,6 +62,20 @@ To install them for real: `npm run package` and `npm run package:sqlite`, then
     the pick is saved in `results.columnFit`.
   * **Copy and export** use the rows as shown, filter and sort included. Ctrl/Cmd+C copies the selected cell, the toolbar
     copies the rows tab-separated, and *Export* copies or saves them as CSV or JSON.
+  * **Edit in place.** The grid starts locked. When a result can be edited, the lock button in the toolbar unlocks it;
+    then double-click a cell, or select it and press Enter or F2, type, and press Enter to store the value (Escape drops it,
+    and the *NULL* button in the editor stores `NULL`). The value is checked against the column's type first: integers,
+    decimals with their precision and scale, booleans, dates, JSON, text length and `NOT NULL`. What the grid shows
+    afterwards is what the database really stored, read back. A result is editable when it is read straight from **one
+    table** (not a view) that has a **primary key** and the key's columns are selected; hover the lock to see why a result
+    is read-only. A computed column, a column shown twice (the first one counts) and binary values stay read-only inside an
+    editable result. Only drivers that implement editing offer it, and the SQLite driver does.
+    By default (`results.editMode` = `autoCommit`) every edit is saved at once. With `manual`, the first edit opens a
+    transaction: changed cells are marked, the toolbar counts them and offers *Commit* and *Roll back*, and a rollback puts
+    the old values back. A connection holds one transaction, so a second result of the same connection cannot edit while
+    the first has edits waiting, and running another statement over a result with edits waiting asks whether to commit,
+    roll back or cancel. `manual` needs a driver with transactions; with any other each edit is saved at once, and the
+    lock's tooltip says so.
 * **Completion.** Tables, views, schemas, columns (after `alias.` or `table.`, or in `SELECT`/`WHERE`/`ON`/... from the
   tables in `FROM`), keywords and functions, in the connection's dialect. Fed from a catalog that is loaded after you
   connect and refreshed after DDL.
@@ -108,7 +122,7 @@ Ports and adapters. Dependencies point inward only, and `test/architecture.test.
 
 | Folder | Depends on | Holds |
 | --- | --- | --- |
-| `src/domain` | nothing | Profiles, results, schema model, driver descriptor, SQL tokenizer/splitter/completion, validation, CSV/JSON export |
+| `src/domain` | nothing | Profiles, results, schema model, driver descriptor, SQL tokenizer/splitter/completion, validation, CSV/JSON export, row-edit rules (which results are editable, which values are valid) |
 | `src/application` | domain | Use cases and **ports**: the `Driver` SPI plus profile store, secret store, history, settings, linter |
 | `src/adapters` | everything inward | VS Code UI and storage, the sqlfluff CLI adapter |
 | `drivers/*` | `src/api` only | One folder per driver extension, each with its own `package.json`. `drivers/sqlite` is the SQLite driver. No core imports beyond the public API |
@@ -128,6 +142,7 @@ uses. See [docs/WRITING_A_DRIVER.md](docs/WRITING_A_DRIVER.md).
 | `betterSqlTools.results.columnFit` | `fitNameAndValue` | Column widths: `fitAll` (equal, to fit the panel), `fitName` or `fitNameAndValue`. Dragging a border still wins for that column. |
 | `betterSqlTools.results.showTypes` | `true` | The data type next to each column's name. |
 | `betterSqlTools.results.colorByType` | `true` | Colour and style values by type and constraints; primary and foreign keys stand out. |
+| `betterSqlTools.results.editMode` | `autoCommit` | Saving edits made in the results grid: `autoCommit` saves each edit at once, `manual` keeps edits in a transaction until *Commit* or *Roll back* (needs a driver with transactions). |
 | `betterSqlTools.connection.timeoutMs` | `30000` | Connect timeout; `0` waits forever. |
 | `betterSqlTools.history.maxEntries` | `200` | Queries kept. |
 | `betterSqlTools.explorer.driverIcons` | `true` | The driver's icon in front of a connection instead of the green database icon. |
@@ -183,15 +198,19 @@ Tests, and what they stand in for:
 * **SQLite is sql.js (WebAssembly).** It keeps the whole database in memory and writes the file after each change, so it is
   meant for development databases. A statement cannot be cancelled mid-run and blocks the extension host while it runs.
   Integers beyond 2^53 lose precision. If the file changes on disk behind its back, the driver refuses to overwrite it and
-  tells you to reconnect. A native SQLite driver would be a better fit for large or shared files.
+  tells you to reconnect. With edits pending, a failed save after *Commit* leaves them listed as pending although the
+  database transaction has ended; retrying tries to save the file again and fails the same way until you reconnect.
+  A native SQLite driver would be a better fit for large or shared files.
 * **No other databases yet.** PostgreSQL, MySQL, SQL Server and friends are separate driver extensions that do not exist yet.
 * **No language server.** sqlfluff has no LSP mode in the version tested (4.x), so linting shells out to its CLI behind a
   `Linter` port; an LSP adapter could slot in there. Completion runs in-process and is deliberately simple: it does not
   look into subqueries or CTEs, does not complete inside quoted identifiers, and offers no signature help.
 * **Statement splitting** does not understand `GO` batch separators, MySQL's `DELIMITER`, or Oracle anonymous `BEGIN … END;` blocks.
-* **Results are read-only**, filters and export cover the loaded rows (up to the row limit), and results are not pinned
-  between runs. A value a project's `.better-sqltools.toml` sets for a `results.*` setting wins over the column-width
-  button, so the button's pick snaps back until that line is removed from the file.
+* **Editing is limited to what can be told apart.** Only results read from a single table with a primary key can be
+  edited, only by a driver that implements editing (SQLite today), and binary values cannot be edited. Filters and
+  export cover the loaded rows (up to the row limit), and results are not pinned between runs. A value a project's
+  `.better-sqltools.toml` sets for a `results.*` setting wins over the column-width button, so the button's pick snaps
+  back until that line is removed from the file.
 * `${workspaceFolder}` means the first workspace folder.
 
 ## Roadmap

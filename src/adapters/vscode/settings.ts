@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import type { EditMode } from '../../application/edit-service';
 import type { SettingsReader } from '../../application/ports';
 import type { SqlfluffOptions } from '../sqlfluff/sqlfluff-linter';
 
@@ -9,6 +10,8 @@ export type LintMode = 'onType' | 'onSave' | 'manual';
 
 export type ColumnFit = 'fitAll' | 'fitName' | 'fitNameAndValue';
 
+export type { EditMode };
+
 /** How the results grid looks and sizes itself. */
 export interface ResultsPrefs {
   columnFit: ColumnFit;
@@ -16,6 +19,8 @@ export interface ResultsPrefs {
   showTypes: boolean;
   /** Values and headers coloured and styled by data type and constraints. */
   colorByType: boolean;
+  /** How edits made in the grid are saved. */
+  editMode: EditMode;
 }
 
 /**
@@ -44,6 +49,7 @@ export class VsCodeSettings implements SettingsReader {
       columnFit: fit === 'fitAll' || fit === 'fitName' ? fit : 'fitNameAndValue',
       showTypes: this.get<boolean>('results.showTypes', true) !== false,
       colorByType: this.get<boolean>('results.colorByType', true) !== false,
+      editMode: this.get<string>('results.editMode', 'autoCommit') === 'manual' ? 'manual' : 'autoCommit',
     };
   }
 

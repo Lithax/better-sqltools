@@ -1,9 +1,10 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import initSqlJs, { type Database, type SqlJsStatic, type SqlValue } from 'sql.js';
-import type { Catalog, CatalogColumn, CatalogTable, DriverInspection, ForeignKeyRef, InspectItem, SchemaNode } from '../../../src/api';
+import type { Catalog, CatalogColumn, CatalogTable, Cell, DriverInspection, ForeignKeyRef, InspectItem, SchemaNode } from '../../../src/api';
 import type {
-  ChildrenOptions, Driver, DriverConfig, DriverEnvironment, DriverFactory, ExecutionContext, RawStatementResult,
+  ChildrenOptions, Driver, DriverConfig, DriverEdit, DriverEnvironment, DriverFactory, ExecutionContext, RawStatementResult,
+  RowChange, RowChangeResult,
 } from '../../../src/api';
 import { sqliteDescriptor } from './descriptor';
 import { sqliteKind } from './types';
@@ -23,6 +24,13 @@ function locateWasm(file: string): string {
 
 const quoteIdent = (s: string) => `"${s.replace(/"/g, '""')}"`;
 
+/** A value from the grid as SQLite stores it: booleans are 0 and 1, and binary values are not edited here. */
+function toSqlValue(v: Cell): SqlValue {
+  if (typeof v === 'boolean') return v ? 1 : 0;
+  if (typeof v === 'object' && v !== null) throw new Error('Binary values cannot be edited here.');
+  return v;
+}
+
 interface Options {
   path: string;
   readOnly: boolean;
@@ -35,6 +43,19 @@ class SqliteDriver implements Driver {
   private file?: string;
   private mtimeMs?: number;
   private dirty = false;
+  private dirtyAtBegin = false;
+
+  /**
+   * Editing rows from the grid. Each edit is one parameterised UPDATE inside a savepoint, so a wrong row count or a failed
+   * constraint changes nothing. `begin` opens a real transaction that the edits then join; `commit` and `rollback` close it
+   * and can be repeated safely.
+   */
+  readonly edit: DriverEdit = {
+    update: (change) => this.updateRow(change),
+    begin: () => this.beginEdits(),
+    commit: () => this.commitEdits(),
+    rollback: () => this.rollbackEdits(),
+  };
 
   constructor(
     private readonly load: () => Promise<SqlJsStatic>,
@@ -309,6 +330,77 @@ class SqliteDriver implements Driver {
         ? this.all("SELECT sql FROM sqlite_master WHERE tbl_name = ? AND type IN ('index','trigger') AND sql IS NOT NULL ORDER BY type, name", [name]).map((r) => String(r.sql))
         : [];
     return [...own, ...extra].map((s) => s.trim().replace(/;?$/, ';')).join('\n\n');
+  }
+
+  // ---- editing -----------------------------------------------------------------
+
+  private async updateRow(change: RowChange): Promise<RowChangeResult> {
+    const db = this.requireDb();
+    if (this.opts.readOnly) throw new Error('This connection is read-only.');
+    if (!change.set.length) throw new Error('There is nothing to change.');
+    if (!change.key.length) throw new Error('A row cannot be found without its primary key.');
+
+    const table = (change.table.schema ? `${quoteIdent(change.table.schema)}.` : '') + quoteIdent(change.table.name);
+    const where = (key: RowChange['key']) => key.map((k) => `${quoteIdent(k.column)} = ?`).join(' AND ');
+    const update =
+      `UPDATE ${table} SET ${change.set.map((s) => `${quoteIdent(s.column)} = ?`).join(', ')} WHERE ${where(change.key)}`;
+    const params = [...change.set.map((s) => toSqlValue(s.value)), ...change.key.map((k) => toSqlValue(k.value))];
+
+    // A savepoint works inside a transaction (it nests) and outside one (it is the transaction, and RELEASE commits it).
+    db.run('SAVEPOINT better_sqltools_edit');
+    try {
+      db.run(update, params);
+      const changed = db.getRowsModified();
+      if (changed === 0) throw new Error('No row with this key was found: it may have been changed or deleted since the query ran.');
+      if (changed > 1) throw new Error(`This would change ${changed} rows instead of one, so nothing was changed.`);
+    } catch (e) {
+      try {
+        db.run('ROLLBACK TO better_sqltools_edit');
+        db.run('RELEASE better_sqltools_edit');
+      } catch {
+        // the original error is the one to report
+      }
+      throw e;
+    }
+    db.run('RELEASE better_sqltools_edit');
+    this.dirty = true;
+
+    // what the database now holds: affinity, triggers and defaults may have changed what was typed
+    let values: Record<string, unknown> | undefined;
+    try {
+      const now = new Map(change.set.map((s) => [s.column.toLowerCase(), s.value] as const));
+      const key = change.key.map((k) => ({ column: k.column, value: now.has(k.column.toLowerCase()) ? now.get(k.column.toLowerCase())! : k.value }));
+      const row = this.all(
+        `SELECT ${change.set.map((s) => quoteIdent(s.column)).join(', ')} FROM ${table} WHERE ${where(key)}`,
+        key.map((k) => toSqlValue(k.value)),
+      )[0];
+      if (row) values = Object.fromEntries(change.set.map((s, i) => [s.column, Object.values(row)[i]]));
+    } catch {
+      values = undefined;
+    }
+
+    await this.persist(); // does nothing while a transaction is open: the flush follows the COMMIT
+    return { affectedRows: 1, ...(values ? { values } : {}) };
+  }
+
+  private async beginEdits(): Promise<void> {
+    const db = this.requireDb();
+    if (this.inTransaction()) throw new Error('A transaction is already open on this connection.');
+    this.dirtyAtBegin = this.dirty;
+    db.run('BEGIN');
+  }
+
+  private async commitEdits(): Promise<void> {
+    const db = this.requireDb();
+    if (this.inTransaction()) db.run('COMMIT');
+    if (this.dirty) await this.persist();
+  }
+
+  private async rollbackEdits(): Promise<void> {
+    const db = this.requireDb();
+    if (!this.inTransaction()) return;
+    db.run('ROLLBACK');
+    this.dirty = this.dirtyAtBegin; // what the transaction changed is gone; only an earlier unsaved change can remain
   }
 
   // ---- helpers -----------------------------------------------------------------

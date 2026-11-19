@@ -918,6 +918,19 @@
           "default": true,
           "description": "Colour and style the results grid by data type and constraints: numbers, text, booleans, dates and NULLs look different, and primary and foreign keys stand out."
         },
+        "betterSqlTools.results.editMode": {
+          "type": "string",
+          "enum": [
+            "autoCommit",
+            "manual"
+          ],
+          "default": "autoCommit",
+          "enumDescriptions": [
+            "Each edit in the results grid is saved as soon as you finish it.",
+            "Edits wait in a transaction until you press Commit, or Roll back to undo them all."
+          ],
+          "markdownDescription": "How edits made in the results grid are saved. `manual` needs a driver that supports transactions; with any other driver each edit is saved at once. A project's `.better-sqltools.toml` can set this too."
+        },
         "betterSqlTools.connection.timeoutMs": {
           "type": "number",
           "default": 30000,

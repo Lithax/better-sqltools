@@ -104,13 +104,15 @@ test('results: sorting cycles ascending, descending, off; NULLs stay last; numbe
 });
 
 const toolbarButton = (p: ReturnType<typeof boot>, label: string) => p.$(`.toolbar button[aria-label^="${label}"]`) as HTMLButtonElement;
+// the lock and the Commit / Roll back buttons are in the toolbar from the start and shown only when the host has something to say about editing
+const shownToolbarButtons = (p: ReturnType<typeof boot>) => p.$$('.toolbar button').filter((b) => (b as HTMLElement).style.display !== 'none');
 const press = (p: ReturnType<typeof boot>, k: string, el: Element, extra: Record<string, unknown> = {}) =>
   el.dispatchEvent(new p.w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...extra }));
 
 test('results: Copy and Export send the rows as shown, in the order shown; the dialog picks the format and the action', () => {
   const p = boot('results');
   p.send({ type: 'state', state: done([people]) });
-  assert.deepEqual(p.$$('.toolbar button').map((b) => b.getAttribute('aria-label')), ['Column widths', 'Copy the rows shown, tab-separated', 'Export the rows shown\u2026']);
+  assert.deepEqual(shownToolbarButtons(p).map((b) => b.getAttribute('aria-label')), ['Column widths', 'Copy the rows shown, tab-separated', 'Export the rows shown\u2026'], 'a read-only result with no word from the host about editing shows no lock');
   assert.ok(p.$$('.toolbar button').every((b) => b.querySelector('.codicon')), 'icon buttons, with their meaning in the label and tooltip');
   assert.equal(p.$('.filter'), null, 'the filter box is gone');
 
@@ -539,7 +541,7 @@ test('results: columns combine; a column lists only what the other filters leave
 
   const clear = p.$('.toolbar button[aria-label="Clear all filters"]');
   assert.ok(clear, 'the way back to everything is offered while a filter is on');
-  assert.equal(p.$$('.toolbar button')[0], clear, 'next to the other tools');
+  assert.equal(shownToolbarButtons(p)[0], clear, 'next to the other tools');
   p.click(clear);
   assert.equal(p.$$('.gbody .grow').length, 6);
   assert.equal(p.$$('.filterbtn.on').length, 0);
@@ -570,6 +572,196 @@ test('results: filters work with sorting and the keyboard, and are kept when the
   p.send({ type: 'state', state: done([orders], { startedAt: 2 }) });
   assert.equal(p.$$('.gbody .grow').length, 6, 'a new run starts unfiltered');
   assert.equal(p.$$('.filterbtn.on').length, 0);
+});
+
+// ---------------------------------------------------------------- editing
+
+// The page only asks. The host decides whether a result can be edited (editStatus), whether a value is accepted and what the database now
+// holds (editResult), and how a commit or rollback ended (editEnd); these tests play the host.
+const items = stmt(0, {
+  sql: 'select id, name, score from items',
+  columns: [{ name: 'id', primaryKey: true, notNull: true }, { name: 'name' }, { name: 'score', notNull: true }],
+  rows: [[1, 'one', 10], [2, 'two', 20], [3, null, 30]],
+});
+const editStatus = (o: Record<string, unknown> = {}) => ({
+  type: 'editStatus', index: 0,
+  status: { editable: true, columns: [{ editable: true }, { editable: true }, { editable: true }], mode: 'manual', transaction: false, pending: [], ...o },
+});
+const lockButton = (p: ReturnType<typeof boot>) => p.$('.toolbar button[aria-pressed]') as HTMLButtonElement;
+const dataCell = (p: ReturnType<typeof boot>, row: number, col: number) => p.$(`.gbody .cell[data-r="${row}"][data-c="${col}"]`);
+const dblclick = (p: ReturnType<typeof boot>, el: Element) => el.dispatchEvent(new p.w.MouseEvent('dblclick', { bubbles: true }));
+const editsSent = (p: ReturnType<typeof boot>) => p.posted.filter((m) => m.type === 'edit').length;
+const unlockedItems = () => {
+  const p = boot('results');
+  p.send({ type: 'state', state: done([items]) });
+  p.send(editStatus());
+  p.click(lockButton(p));
+  return p;
+};
+
+test('results: a real double click opens the editor, although the first click repaints the cell and the browser then sends no dblclick', () => {
+  const p = unlockedItems();
+  const click = (el: Element, detail: number) => el.dispatchEvent(new p.w.MouseEvent('click', { bubbles: true, detail }));
+  const first = dataCell(p, 0, 1)!;
+  click(first, 1);
+  assert.equal(p.$('.cell-input'), null, 'one click only selects');
+  const second = dataCell(p, 0, 1)!;
+  assert.notEqual(second, first, 'the first click rebuilt the cell, as it does in a browser');
+  assert.ok(second.classList.contains('sel'));
+  click(second, 2); // the second click of the pair is on the NEW element, and no dblclick event follows
+  const input = p.$('.cell-input') as HTMLInputElement;
+  assert.ok(input, 'the editor is open');
+  assert.equal(input.value, 'one');
+  assert.equal(p.doc.activeElement, input);
+  p.send({ type: 'editStatus', index: 0, status: editStatus().status }); // an unrelated host message does not close or rebuild it
+  assert.equal(p.$('.cell-input'), input, 'the same editor');
+
+  const q = unlockedItems();
+  const press2 = (el: Element, detail: number) => el.dispatchEvent(new q.w.MouseEvent('click', { bubbles: true, detail }));
+  press2(dataCell(q, 0, 1)!, 1);
+  press2(dataCell(q, 1, 1)!, 2); // two quick clicks on DIFFERENT cells are not a double click
+  assert.equal(q.$('.cell-input'), null);
+  assert.ok(dataCell(q, 1, 1)!.classList.contains('sel'), 'the second cell is selected');
+});
+
+test('results: the lock appears once the host reports on editing; a result that cannot be edited says why and stays locked', () => {
+  const p = boot('results');
+  p.send({ type: 'state', state: done([items]) });
+  assert.equal(lockButton(p).style.display, 'none', 'nothing is known about editing until the host has looked at the result');
+  assert.equal(p.$$('.cell.editable').length, 0);
+
+  p.send(editStatus());
+  assert.equal(lockButton(p).style.display, '');
+  assert.equal(lockButton(p).getAttribute('aria-pressed'), 'false');
+  assert.match(lockButton(p).title, /^Locked\./);
+  assert.equal((p.$('.toolbar .txnbtn') as HTMLElement).style.display, 'none', 'Commit and Roll back wait for a pending edit');
+  dblclick(p, dataCell(p, 0, 1)!);
+  assert.equal(p.$('.cell-input'), null, 'locked: a double click edits nothing');
+
+  p.click(lockButton(p));
+  assert.equal(lockButton(p).getAttribute('aria-pressed'), 'true');
+  assert.match(lockButton(p).title, /^Editing is on/);
+  assert.equal(p.$$('.gbody .cell.editable').length, 9, 'every cell the host allows can be edited');
+  p.click(lockButton(p));
+  assert.equal(p.$$('.gbody .cell.editable').length, 0, 'and the lock shuts it again');
+
+  const q = boot('results');
+  q.send({ type: 'state', state: done([items]) });
+  q.send(editStatus({ editable: false, reason: 'The result joins two tables.' }));
+  assert.match(lockButton(q).title, /^Read-only: The result joins two tables\./);
+  assert.equal(lockButton(q).getAttribute('aria-disabled'), 'true');
+  q.click(lockButton(q));
+  assert.equal(lockButton(q).getAttribute('aria-pressed'), 'false', 'the lock does not open');
+  assert.match(q.text('.toast'), /Read-only: The result joins two tables\./);
+});
+
+test('results: a cell is edited in place; the page waits for the host, shows what the database holds, marks the change as pending and commits', () => {
+  const p = unlockedItems();
+  dblclick(p, dataCell(p, 0, 1)!);
+  const input = p.$('.cell-input') as HTMLInputElement;
+  assert.equal(input.value, 'one');
+  assert.equal(p.doc.activeElement, input, 'the editor has the focus');
+  p.type(input, 'uno');
+  press(p, 'Enter', input);
+  assert.deepEqual(p.last('edit'), { type: 'edit', index: 0, row: 0, col: 1, value: 'uno', id: 1 });
+  assert.equal(input.readOnly, true, 'it waits for the host');
+  assert.equal(dataCell(p, 0, 1)!.querySelector('.cell-input'), input, 'and nothing has changed on the page yet');
+
+  p.send({ type: 'editResult', id: 1, index: 0, row: 0, col: 1, ok: true, changed: true, value: 'UNO' }); // the database may store something else than what was typed
+  assert.equal(p.$('.cell-input'), null);
+  assert.equal(dataCell(p, 0, 1)!.textContent, 'UNO', 'the value as the database holds it');
+
+  p.send(editStatus({ transaction: true, pending: [{ row: 0, col: 1, before: 'one', after: 'UNO' }] }));
+  assert.ok(dataCell(p, 0, 1)!.classList.contains('pending'));
+  assert.equal(p.$$('.cell.pending').length, 1);
+  assert.equal(p.text('.pendingcount'), '1 pending edit');
+  const [commit, rollback] = p.$$('.toolbar .txnbtn');
+  assert.deepEqual([commit.style.display, rollback.style.display], ['', '']);
+  assert.deepEqual([commit.textContent, rollback.textContent], ['Commit', 'Roll back']);
+
+  p.click(commit);
+  assert.deepEqual(p.last('commit'), { type: 'commit', index: 0 });
+  p.send({ type: 'editEnd', index: 0, kind: 'commit', ok: true, count: 1, restored: [] });
+  assert.match(p.text('.toast'), /Committed 1 edit/);
+  p.send(editStatus());
+  assert.deepEqual([commit.style.display, rollback.style.display], ['none', 'none']);
+  assert.equal(p.$$('.cell.pending').length, 0);
+  assert.equal(dataCell(p, 0, 1)!.textContent, 'UNO');
+});
+
+test('results: Roll back puts back the values the host gives; a failed commit says why', () => {
+  const p = unlockedItems();
+  p.send({ type: 'editResult', id: 7, index: 0, row: 1, col: 2, ok: true, changed: true, value: 99 }); // an edit made earlier: the page applies what the host holds
+  p.send(editStatus({ transaction: true, pending: [{ row: 1, col: 2, before: 20, after: 99 }, { row: 2, col: 1, before: null, after: 'x' }] }));
+  assert.equal(dataCell(p, 1, 2)!.textContent, '99');
+  assert.equal(p.text('.pendingcount'), '2 pending edits');
+
+  p.click(p.$$('.toolbar .txnbtn')[1]);
+  assert.deepEqual(p.last('rollback'), { type: 'rollback', index: 0 });
+  p.send({ type: 'editEnd', index: 0, kind: 'rollback', ok: true, count: 2, restored: [{ row: 1, col: 2, value: 20 }, { row: 2, col: 1, value: null }] });
+  assert.equal(dataCell(p, 1, 2)!.textContent, '20');
+  assert.match(p.text('.toast'), /Rolled back 2 edits/);
+
+  p.click(p.$$('.toolbar .txnbtn')[0]);
+  p.send({ type: 'editEnd', index: 0, kind: 'commit', ok: false, error: 'database is locked' });
+  assert.match(p.text('.toast'), /database is locked/);
+  assert.ok(p.$('.toast')!.classList.contains('bad'));
+});
+
+test('results: a refused value stays in the editor with the reason; Escape drops the edit; an unchanged value sends nothing; NULL is offered only where the column allows it', () => {
+  const p = unlockedItems();
+
+  dblclick(p, dataCell(p, 1, 2)!); // score: NOT NULL
+  assert.equal(p.$$('.nullbtn').length, 0, 'a NOT NULL column has no NULL button');
+  const input = p.$('.cell-input') as HTMLInputElement;
+  p.type(input, 'lots');
+  press(p, 'Enter', input);
+  const sent = p.last('edit');
+  assert.equal(sent.value, 'lots');
+  p.send({ type: 'editResult', id: sent.id, index: 0, row: 1, col: 2, ok: false, error: 'score must be a whole number.' });
+  assert.equal(input.getAttribute('aria-invalid'), 'true');
+  assert.equal(input.title, 'score must be a whole number.');
+  assert.equal(input.readOnly, false, 'the person can correct it');
+  assert.match(p.text('.toast'), /whole number/);
+  assert.ok(p.$('.toast')!.classList.contains('bad'));
+  press(p, 'Escape', input);
+  assert.equal(p.$('.cell-input'), null, 'Escape drops what was typed');
+  assert.equal(dataCell(p, 1, 2)!.textContent, '20');
+  assert.equal(editsSent(p), 1, 'and sends nothing');
+
+  dblclick(p, dataCell(p, 0, 1)!); // name: nullable
+  press(p, 'Enter', p.$('.cell-input'));
+  assert.equal(editsSent(p), 1, 'the same value is not sent again');
+  assert.equal(p.$('.cell-input'), null);
+
+  dblclick(p, dataCell(p, 0, 1)!);
+  assert.equal(p.$$('.nullbtn').length, 1);
+  p.click(p.$('.nullbtn'));
+  assert.deepEqual(p.last('edit'), { type: 'edit', index: 0, row: 0, col: 1, value: null, id: 2 });
+});
+
+test('results: Enter on the selected cell opens the editor; a column the host calls read-only says why; binary values are not edited here', () => {
+  const p = boot('results');
+  p.send({ type: 'state', state: done([people]) });
+  p.send(editStatus({ columns: [{ editable: false, reason: 'This value is computed.' }, { editable: true }, { editable: true }] }));
+  press(p, 'Enter', p.$('.grid'));
+  assert.equal(p.$('.cell-input'), null, 'locked: Enter does nothing');
+  p.click(lockButton(p));
+
+  dblclick(p, dataCell(p, 0, 0)!);
+  assert.equal(p.$('.cell-input'), null);
+  assert.match(p.text('.toast'), /This value is computed\./);
+
+  dblclick(p, dataCell(p, 1, 2)!); // the blob
+  assert.equal(p.$('.cell-input'), null);
+  assert.match(p.text('.toast'), /Binary values cannot be edited here/);
+
+  p.click(dataCell(p, 2, 1)!);
+  press(p, 'Enter', p.$('.grid'));
+  assert.equal((p.$('.cell-input') as HTMLInputElement).value, 'Bob', 'the selected cell, edited from the keyboard');
+  press(p, 'Escape', p.$('.cell-input'));
+  assert.equal(p.$('.cell-input'), null);
+  assert.equal(editsSent(p), 0);
 });
 
 // ---------------------------------------------------------------- connection form
