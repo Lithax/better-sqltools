@@ -20,7 +20,7 @@ SQLite driver) and `examples/demo` open (a small library database and a `queries
 in the Better SQLTools view, open `queries.sql`, and press `Ctrl+Enter` (`Cmd+Enter` on a Mac) on a statement.
 
 To install them for real: `npm run package` and `npm run package:sqlite`, then
-`code --install-extension better-sqltools-0.1.0.vsix` and `code --install-extension drivers/sqlite/better-sqltools-sqlite-0.1.0.vsix`.
+`code --install-extension better-sqltools-0.2.0.vsix` and `code --install-extension drivers/sqlite/better-sqltools-sqlite-0.2.0.vsix`.
 
 ## What it does
 
@@ -171,8 +171,8 @@ npm install
 npm run build        # esbuild → dist/extension.js, and drivers/sqlite/dist (+ the sql.js WASM beside it)
 npm run typecheck
 npm test             # unit, integration, end to end (mocked VS Code), webviews (jsdom), production bundles
-npm run package      # → better-sqltools-0.1.0.vsix
-npm run package:sqlite   # → drivers/sqlite/better-sqltools-sqlite-0.1.0.vsix
+npm run package      # → better-sqltools-0.2.0.vsix
+npm run package:sqlite   # → drivers/sqlite/better-sqltools-sqlite-0.2.0.vsix
 npm run icons        # regenerates the PNG extension icons (no image library needed)
 ```
 

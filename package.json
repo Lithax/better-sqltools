@@ -2,7 +2,7 @@
   "name": "better-sqltools",
   "displayName": "Better SQLTools",
   "description": "A modern SQL client for VS Code: pluggable drivers, a themed results grid, schema-aware completion and sqlfluff linting.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "better-sqltools",
   "license": "MIT",
   "repository": {

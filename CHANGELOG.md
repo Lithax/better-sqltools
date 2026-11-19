@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 * **Results grid redesign.**
   * Headers show each column's type, with `PK` / `FK` / `UQ` pills and a tooltip with the constraint details, all taken from

@@ -2,7 +2,7 @@
   "name": "better-sqltools-sqlite",
   "displayName": "Better SQLTools: SQLite Driver",
   "description": "SQLite driver for Better SQLTools, powered by sql.js (WebAssembly). Nothing native to install.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "better-sqltools",
   "license": "MIT",
   "repository": {
